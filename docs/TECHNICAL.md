@@ -1,0 +1,95 @@
+# T7 Ghost AI — technical overview
+
+Target: Tekken 7, Steam, final build (`TekkenGame-Win64-Shipping.exe`, PE timestamp `0x63EB1C19`,
+2023-02-14, Unreal Engine 4). The mod checks the timestamp and stays inert on any other build.
+
+## Loading
+
+`version.dll` in `TekkenGame/Binaries/Win64` is a proxy: it forwards all 15 exports of the system
+`version.dll` (one generic 8-argument x64 forwarder, `src/proxy_version.cpp`) and starts one worker
+thread from `DllMain`. Hooks use MinHook.
+
+## Memory layout (`src/t7.hpp`)
+
+**Fight-state ring.** `[[exe + 0x35037B8] + 0x8]` is the base of 8 game-state copies (stride `0x1E710`),
+one per recent frame; the frame counter is at `+0xA70`, player 2's block at `+0x7840`. Reading the
+newest copy every 2 ms gives every frame, also during replay fast-forward (with gaps). Startup fields
+(`+0x7780`, `+0x7784`) exist only in these copies.
+
+**Live player objects.** P1 `exe + 0x34EA7D0`, P2 `exe + 0x34EDE40` (same field offsets).
+
+**Per-player fields** (selection; full list in `t7.hpp`):
+
+| Field | Offset | Notes |
+|---|---|---|
+| char | `0xDC` | character id |
+| move_timer | `0x1F0` | frames into the current move |
+| attack_type | `0x329` (u8) | hit level; 0 = not an attack, 1 low, 2-4 mid, 5 high, 10 throw |
+| move_id | `0x350` | |
+| recovery | `0x39C` | total frames of the current move |
+| hit_outcome | `0x3D8` | block / hit / counter-hit codes |
+| simple_state / stun | `0x428` / `0x42C` | standing, crouching, juggled, down...; stun timer |
+| throw_tech | `0x450` | low byte at a grab: `0x1C` break 1, `0x1E` break 1+2, `0x1F` break 2 (`0x1D` idle) |
+| rage_fx | `0x8E0` | rage aura timer |
+| input_dir | `0xDDC` | player-relative direction |
+| raw_held | `0xE4C` | raw button word (screen-absolute directions) |
+| hp | `0x1508` | health percent |
+| distance | `0x1450` | |
+| px / py / pz | `0x1610` / `0x1614` / `0x1618` | continuous root position |
+| startup / startup_end | `0x7780` / `0x7784` | ring copies only; one frame behind on a new move |
+
+**Globals:** game mode `exe + 0x34D67A8` (0 menus, 2 Practice and offline VS, 3 replay), Practice dummy
+is CPU `exe + 0x3447820`, Practice CPU level `exe + 0x3447834` (4 = Ultra Hard), stage id
+`exe + 0x34DF550` (ids in `analysis/stages.py`).
+
+**Input.** `decode_input` at `exe + 0x747F50`, signature `(Player*, int side, u32 held, u32 pressed)`,
+called per player per frame. The AI overrides `held`/`pressed` for P2. Bits (player-relative):
+up `0x1`, down `0x2`, back `0x4`, forward `0x8`; buttons 1 `0x4000`, 2 `0x8000`, 3 `0x1000`, 4 `0x2000`.
+
+## Recordings (JSONL)
+
+One line per frame: `{"f": frame, "p1": {...fields...}, "p2": {...}}`, plus
+`{"reset": 1, ...}` when the frame counter restarts (new round) and probe rows:
+`{"names_probe": [[base, offset, enc, len, hash12], ...], "side_info": [...], "stage": id, ...}`.
+`names_probe` holds only the first 12 hex digits of HMAC-SHA256(key, name bytes); the key is 32
+random bytes created on the recording PC (`private/salt.bin`) and never shared, so names can't be
+recovered and the same player keeps one code per key.
+
+## Profiles (`.t7p`, text, version `T7P 4`)
+
+```
+char <id> / name <Character-Pnn> / frames <n> / tb <grabs> <breaks>
+k <move> <cont% whiff> <cont% blocked> <cont% hit> <n> <n> <n>      hit-confirm per string starter
+c <kind> <sit> <dist> <adv> <oppatk> <startup> <lead> <outcome> <damage> <first_move>
+  <life> <rage> <opp_rage> <crouch> <advb> <inputs: value:count,...>                 one decision
+```
+
+Kinds: attack, neutral (movement/guard), wakeup, air. Situations: neutral, opponent startup /
+recovery / stunned / juggled / down, self down. `advb` = frame-advantage bucket at the decision.
+
+`framedata.txt`: `m <char> <move> <startup> <level> <damage> <block_adv> <hit_adv> <launch%> <n_block>
+<n_hit> <range> <start_range>` — learned from the recordings. `learned_framedata.txt`:
+`l <char> <move> <frames>` — frames the AI really had after blocking a move, measured in play.
+`opponent_<char>.txt` (`OPP 1`): the AI's model of the human per character (attack rates and levels
+per situation, getup habits, seen moves, punish results, lost interrupts, sidestep results).
+
+## The AI (`src/brain.hpp`, `src/adapt.hpp`)
+
+Per frame, with a perception delay (`reaction_frames`; or instantly for moves "read" by the
+`input_read_chance` cheat): guard strings, buffered punishes on the last blockstun frame (window from
+learned readings, then frame data, then live recovery), whiff punishes (dashing in if needed),
+juggles with the player's combos, hit-confirm, throw breaks, then the recorded player's own choice
+for the situation (frame advantage, distance, life lead, rage), weighted by how it worked out in the
+replays. `adapt.hpp` models the human live and biases those choices.
+
+## Settings panel (`src/overlay.hpp`)
+
+Hooks `IDXGISwapChain::Present` / `ResizeBuffers` (found through a throwaway D3D11 swap chain),
+draws Dear ImGui over the game's back buffer while open, and subclasses the window procedure for
+input. Changes go to the running AI and to `t7ghost.ini` (WritePrivateProfileString).
+
+## Harvesters (`src/harvest.cpp`)
+
+The recorder alone, with no hooks: replay variant (records while game mode = 3, optional
+auto-navigation through the Battle Log with Ctrl+F8) and live variant (any non-replay fight; writes
+frames 6 behind the newest because online fights roll back).
