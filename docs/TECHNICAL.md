@@ -111,10 +111,28 @@ name and looked up again at setup.
 
 End-of-match menu: the game's own two-option menu (Next match / Start Over, Return to Main Menu) is up
 while `[exe+0x34D6C04]` is non-zero; `[exe+0x379B16C]` is 3 after the KO and while paused, 2 in a fight.
-The mod draws its menu over it and hooks `XInputGetState` (xinput1_3, imported by the game): neutral
-pads while the menu is open, then scripted presses on the native menu (A = continue, Down + A = main
-menu; it opens on the top entry and wraps). Character Select: continue, press Start until the next fight
-is paused (not possible during the intros), then Up, Up (= Character Select), A, Left (= Yes), A.
+The mod hooks `XInputGetState` (xinput1_3, imported by the game): neutral pads while its menu is open,
+then the native menu is confirmed for the player (A = continue; for the second option the dialog's index
+`+0xB4/+0xE4` is set to 1 first).
+
+The menus are Scaleform movies driven from C++. The result menu is the generic dialog
+`SW_UI_Dialog_Steam` (class: build `0x49D600`, cursor `0x49F010`, Decide `0x49F120`; handle methods
+`0x2A15xx-0x2A1Bxx`, e.g. selected index `0x2A1890`). Its layout comes from
+`_root.SetButtonType("Button_L" | "Button_S", n)` (queued Invoke `0x450F90`), labels from the text
+variables `$button_big_text1..n` (`0x458020`), the cursor from "Select"/"Normal" on
+`...Buttons_L_mc.Button_L<i>` (`0x454190`). Native look: inside the game's window build the mod changes
+that SetButtonType count to its 5 rows (the window box is sized when its "Start" animation first plays),
+then sets its labels; its cursor drives the highlight, and the game's "Decide" is played on the chosen
+row. Character Select: the native "End Treasure Battle" is confirmed and the next scene request
+(`0x20FFB80([exe+0x34D5B58], code)`, `[mgr+0x80]`) is changed to 4 = Character Select, so Treasure
+first ends its own way (an earlier direct request left a black screen).
+
+Main menu name: the Scaleform text table entry `menu_main_22` ("TREASURE BATTLE" / "Treasure Battle")
+is renamed in memory once the menus are up, heap only, re-checked right before each write.
+
+HUD treasure chests: the clips `_root.HUD_Positioning_mc.TreasureBox_Set_mc...` are played by `0x53CB90`
+(show), `0x53CD40` (update) and `0x53C9A0` (end); with "Hide treasure chests" they return without
+playing (the results screen is another movie).
 
 ## Harvesters (`src/harvest.cpp`)
 

@@ -23,14 +23,17 @@
 #include <share.h>
 #include <tlhelp32.h>
 #include <psapi.h>
+#include <intrin.h>
 #include <Xinput.h>
 #include <timeapi.h>
 #include <algorithm>
+#include <thread>
 #include <atomic>
 #include <cstdarg>
 #include <cstdio>
 #include <ctime>
 #include <map>
+#include <set>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -39,7 +42,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 
 namespace {
 
-#define T7_VERSION_STR "0.6.3" // keep in step with the t7ghost.ini header (tools/write_ini.py)
+#define T7_VERSION_STR "0.7.2" // keep in step with the t7ghost.ini header (tools/write_ini.py)
 constexpr const char *kModVersion = T7_VERSION_STR;
 std::wstring g_dir; // .../Win64/t7ghost/
 FILE *g_log = nullptr;
@@ -346,7 +349,7 @@ LONG CALLBACK veh(EXCEPTION_POINTERS *ep)
 	return EXCEPTION_CONTINUE_EXECUTION;
 }
 
-void set_debug_regs(uintptr_t a0, uintptr_t a1, bool on)
+void set_debug_regs(uintptr_t a0, uintptr_t a1, bool on, bool reads = false)
 {
 	const DWORD self = GetCurrentThreadId(), pid = GetCurrentProcessId();
 	HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
@@ -364,10 +367,11 @@ void set_debug_regs(uintptr_t a0, uintptr_t a1, bool on)
 		c.ContextFlags = CONTEXT_DEBUG_REGISTERS;
 		if (GetThreadContext(th, &c))
 		{
-			// slot 0 and 1: break on 4-byte writes (RW=01, LEN=11)
+			// slot 0 and 1: break on 4-byte writes (RW=01, LEN=11), or reads and writes (RW=11)
 			c.Dr0 = on ? a0 : 0;
 			c.Dr1 = on ? a1 : 0;
-			c.Dr7 = on ? (1 | (1 << 2) | (1 << 16) | (3 << 18) | (1 << 20) | (3 << 22)) : 0;
+			const DWORD64 rw = reads ? 3 : 1;
+			c.Dr7 = on ? (1 | (1 << 2) | (rw << 16) | (3 << 18) | (rw << 20) | (3 << 22)) : 0;
 			c.Dr6 = 0;
 			if (SetThreadContext(th, &c))
 				++n;
@@ -474,10 +478,13 @@ ghost::Brain *load_brain()
 	b->cfg.ghost_battle = geti(L"ghost_battle", L"enabled", 1) != 0;
 	b->cfg.gb_random_stage = geti(L"ghost_battle", L"random_stage", 1) != 0;
 	b->cfg.gb_ghost_opponents = geti(L"ghost_battle", L"ghost_opponents", 1) != 0;
-	b->cfg.gb_special_fights = geti(L"ghost_battle", L"special_fights", 1) != 0;
+	b->cfg.gb_special_fights = geti(L"ghost_battle", L"special_fights", 0) != 0;
 	b->cfg.gb_default_costumes = geti(L"ghost_battle", L"default_costumes", 0) != 0;
 	b->cfg.gb_random_player = geti(L"ghost_battle", L"random_player", 0) != 0;
 	b->cfg.gb_end_menu = geti(L"ghost_battle", L"end_menu", 1) != 0;
+	b->cfg.gb_native_menu = geti(L"ghost_battle", L"native_menu", 1) != 0;
+	b->cfg.gb_rename = geti(L"ghost_battle", L"rename", 1) != 0;
+	b->cfg.gb_hide_chests = geti(L"ghost_battle", L"hide_chests", 1) != 0;
 
 	// profiles/index.txt lists "<char> <name> <frames>" best-first; [profiles] c<char>=<name> overrides
 	const std::wstring dir = g_dir + L"profiles/";
@@ -723,6 +730,10 @@ decoded:
 
 #include "ghostbattle.hpp"
 #include "gbmenu.hpp"
+#include "gbtext.hpp"
+#ifndef T7_PUBLIC
+#include "menutrace.hpp"
+#endif
 #include "overlay.hpp"
 
 bool install_hooks()
@@ -746,6 +757,9 @@ bool install_hooks()
 	logf("hook: decode_input hooked");
 	gb::install();
 	gbm::install();
+#ifndef T7_PUBLIC
+	mtrace::install();
+#endif
 	return true;
 }
 
@@ -815,51 +829,33 @@ void mode_tick()
 		t7::read_global(t7::kDummyIsCpu), t7::read_global(t7::kCpuLevel), t7::read_global(t7::kStageId), c1, c2);
 }
 
-// Ghost Battle recon (Ctrl+F4): find the menu text "TREASURE BATTLE" in the game's memory (UTF-16 and
-// ASCII, any case variant listed) for the later runtime rename. Logs where it lives (module-relative or
-// heap) and how often; never logs other memory contents.
-void find_menu_text()
+// Character Select recon (dev, 2026-10-19): watch who reads a Treasure dialog's result - chosen index
+// (+0xE4) and decided flag (+0xEA, in the dword at +0xE8) - to find the owners (result screen, pause menu)
+// and the code behind the pause menu's "Return to Character Select". Armed when a new Treasure dialog shows
+// up, dumped when it changes or after 20 s.
+void dialog_watch_tick()
 {
-	static const wchar_t *words[] = { L"TREASURE BATTLE", L"Treasure Battle", L"TREASURE" };
-	const HMODULE exe = GetModuleHandleW(nullptr);
-	MODULEINFO mi{};
-	K32GetModuleInformation(GetCurrentProcess(), exe, &mi, sizeof mi);
-	const uintptr_t m0 = uintptr_t(mi.lpBaseOfDll), m1 = m0 + mi.SizeOfImage;
-	int total[3] = {}, logged = 0;
-	uintptr_t a = 0x10000;
-	MEMORY_BASIC_INFORMATION mb;
-	std::vector<uint8_t> buf;
-	while (VirtualQuery(reinterpret_cast<void *>(a), &mb, sizeof mb) == sizeof mb)
+	static uintptr_t armed = 0;
+	static ULONGLONG since = 0;
+	const uintptr_t d = gbm::g_dialog;
+	if (armed && (d != armed || GetTickCount64() - since > 20000))
 	{
-		const uintptr_t start = uintptr_t(mb.BaseAddress), size = mb.RegionSize;
-		a = start + size;
-		if (mb.State != MEM_COMMIT || (mb.Protect & (PAGE_GUARD | PAGE_NOACCESS)) || size > (512u << 20) ||
-			!(mb.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)))
-			continue;
-		buf.resize(size);
-		if (!t7::safe_copy(buf.data(), start, size))
-			continue;
-		for (int w = 0; w < 3; ++w)
-		{
-			const size_t n = wcslen(words[w]) * 2;
-			const uint8_t *pat = reinterpret_cast<const uint8_t *>(words[w]);
-			for (size_t i = 0; i + n <= size; i += 2)
-				if (buf[i] == pat[0] && std::memcmp(&buf[i], pat, n) == 0)
-				{
-					++total[w];
-					if (logged < 40)
-					{
-						const uintptr_t at = start + i;
-						if (at >= m0 && at < m1)
-							logf("text: \"%ls\" at exe+0x%llX", words[w], (unsigned long long)(at - m0));
-						else
-							logf("text: \"%ls\" at heap %p (region %p, %zu KB)", words[w], (void *)at, (void *)start, size / 1024);
-						++logged;
-					}
-				}
-		}
+		set_debug_regs(0, 0, false);
+		dump_hits("dialog result readers");
+		armed = 0;
 	}
-	logf("text: found %d x \"TREASURE BATTLE\", %d x \"Treasure Battle\", %d x \"TREASURE\" (UTF-16)", total[0], total[1], total[2]);
+	if (d && d != armed && !g_watching && t7::read_global(t7::kBattleType) == t7::kBattleTreasure)
+	{
+		if (!g_veh)
+			g_veh = AddVectoredExceptionHandler(1, veh);
+		{
+			std::lock_guard lk(g_hits_mx);
+			g_hits.clear();
+		}
+		logf("watch: dialog %p, result fields +0xE4 / +0xE8", (void *)d);
+		set_debug_regs(d + 0xE4, d + 0xE8, true, true);
+		armed = d, since = GetTickCount64();
+	}
 }
 
 void dump_players()
@@ -932,6 +928,7 @@ DWORD WINAPI worker(void *)
 		if (hotkey(VK_F9))
 			g_brain = load_brain(), load_menu_key(); // old brain intentionally leaked: the game thread may still hold it
 		overlay_tick();
+		gbt::tick(); // "GHOST BATTLE" in the menus
 		Sleep(15);
 	}
 #endif
@@ -945,10 +942,16 @@ DWORD WINAPI worker(void *)
 	{
 		if (hotkey(VK_F6)) g_rec.toggle();
 		if (hotkey(VK_F5)) dump_players();
-		if (hotkey(VK_F4)) find_menu_text();
+		if (hotkey(VK_F4)) gbt::in_background([] { gbt::report(); });
+		if (hotkey(VK_F3)) gbt::in_background([] { gbt::rename(); });
+		gbt::tick();
 		mode_tick();
 		if (hotkey(VK_F7)) g_tracer.toggle();
-		if (hotkey(VK_F8)) g_tracer.mark();
+#ifndef T7_PUBLIC
+		if (hotkey(VK_F8)) g_tracer.mark(), mtrace::mark();
+		if (hotkey(VK_F2)) mtrace::toggle();
+		// dialog_watch_tick(); // done (2026-10-19): readers found; the getter hooks in menutrace.hpp log the owners
+#endif
 		g_tracer.tick();
 		if (hotkey(VK_F10)) toggle_watch();
 		if (hotkey(VK_F9))

@@ -271,9 +271,52 @@ uintptr_t __fastcall next_hook(uintptr_t self, uintptr_t fight, uintptr_t r8, ui
 	return r;
 }
 
+// HUD treasure chests (bottom middle during a Treasure match; 2026-10-19). The HUD movie's chest clips
+// ("_root.HUD_Positioning_mc.TreasureBox_Set_mc.TreasureBox_0N_mc.Box_<Hide|Wood|Red|Silver|Gold|Rainbow>_mc",
+// name table at exe+0x343F2F0) are played by three functions (this, data {count 1-3, chest type x3}):
+// show 0x53CB90 (label NumN on the set, "Start" per chest), update 0x53CD40 (count / type changes mid-match)
+// and end 0x53C9A0 ("End" / "LostAnm"). Their callers only log when they return false. With "Hide treasure
+// chests" on they return true without playing anything, so the chests never appear; the results / unlock
+// screen is a different movie and keeps its chests.
+constexpr uintptr_t kChestFns[3] = { 0x53CB90, 0x53CD40, 0x53C9A0 };
+using ChestFn = bool(__fastcall *)(uintptr_t, uintptr_t, uintptr_t);
+ChestFn g_chest_orig[3] = {};
+
+bool hide_chests()
+{
+	ghost::Brain *b = g_brain;
+	return b && b->cfg.ghost_battle && b->cfg.gb_hide_chests && t7::read_global(t7::kBattleType) == t7::kBattleTreasure;
+}
+
+template <int I> bool __fastcall chest_hook(uintptr_t self, uintptr_t data, uintptr_t r8)
+{
+	if (!hide_chests())
+		return g_chest_orig[I](self, data, r8);
+	if (I == 0)
+		logf("gb: HUD treasure chests hidden");
+	return true;
+}
+
+void install_chests()
+{
+	const uintptr_t base = t7::exe_base();
+	static const uint8_t pro[3][6] = { { 0x40, 0x55, 0x41, 0x56, 0x48, 0x81 }, { 0x40, 0x53, 0x41, 0x55, 0x41, 0x56 },
+		{ 0x4C, 0x8B, 0xDC, 0x55, 0x41, 0x54 } };
+	void *hooks[3] = { reinterpret_cast<void *>(&chest_hook<0>), reinterpret_cast<void *>(&chest_hook<1>), reinterpret_cast<void *>(&chest_hook<2>) };
+	for (int i = 0; i < 3; ++i)
+	{
+		auto *f = reinterpret_cast<void *>(base + kChestFns[i]);
+		if (std::memcmp(f, pro[i], sizeof pro[i]) != 0 || MH_CreateHook(f, hooks[i], reinterpret_cast<void **>(&g_chest_orig[i])) != MH_OK ||
+			MH_EnableHook(f) != MH_OK)
+			return logf("gb: HUD chest code mismatch / hook failed (%d), chests stay", i);
+	}
+	logf("gb: HUD treasure chests hooked");
+}
+
 bool install()
 {
 	const uintptr_t base = t7::exe_base();
+	install_chests();
 	static const uint8_t next_pro[] = { 0x40, 0x53, 0x57, 0x41, 0x54, 0x41, 0x57 }; // push rbx/rdi/r12/r15
 	static const uint8_t ghost_pro[] = { 0x4D, 0x85, 0xC9, 0x0F, 0x84 };             // test r9,r9; je
 	auto *next = reinterpret_cast<void *>(base + kTreasureNext), *ghost = reinterpret_cast<void *>(base + kApplyGhost);

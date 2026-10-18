@@ -9,7 +9,7 @@ defaults below are written (release template).
 import configparser
 import sys
 
-VERSION = "0.6.3"  # keep in step with T7_VERSION_STR in src/main.cpp
+VERSION = "0.7.2"  # keep in step with T7_VERSION_STR in src/main.cpp
 DOWNLOAD = ". . . "  # pending: the download link for updates
 
 # (key, default, explanation)
@@ -22,11 +22,10 @@ AI = [
     ("punish", "1", "1 = always punish when a punisher the player used fits the window"),
     ("combos", "1", "1 = continue juggles with the player's own combos"),
     ("guard_skill", "100", "0-100: how often perceived attacks are guarded correctly (scaled by the player's guard habit)"),
-    ("decision_skill", "60", "0-100: favour the player's attacks that landed (hit/counter/launch) over whiffs and stuffed moves"),
+    ("decision_skill", "60", "0-100: How much the Ghosts favour attacks that are statistically proven to land more often than ones that whiffed or got counter-hit."),
     ("adapt", "70", "0-100: how strongly the AI adapts to YOUR habits learned during play (kept per character you use)"),
     ("throw_break_chance", "0", "throw breaks: 0 = each player's own break rate from the replays (most ~5-15%), 1 = never, 2-100 = % chance (100 = always)"),
-    ("wall_awareness", "1", "1 = walls change how it plays: sidesteps away from walls, defends corners (and throws out of them),\n"
-                            "; presses you harder with heavy moves when your back is to a wall. 0 = off (if it plays strangely)"),
+    ("wall_awareness", "1", "1 = on, 0 = off. Tick to let the location of nearby walls influence the Ghost's behaviors. Ghosts will sidestep away from walls, defend near corners, pressure you against walls."),
 ]
 PROFILES_NOTE = ("; per character id: c21=merged (default: all recorded players as one),\n"
                  "; c21=hybrid (best player's style, other players fill gaps + share punishes/combos), or c21=Katarina-P01 (that player only)")
@@ -35,13 +34,16 @@ UI = [
                        "; modifiers allowed, e.g. Ctrl+F1, Shift+Home"),
 ]
 GB = [
-    ("enabled", "1", "1 = Ghost Battle Mode: Treasure Battle uses the round count from your Game Options"),
-    ("random_stage", "1", "1 = a random stage every fight (the game keeps one stage for 5 fights)"),
-    ("ghost_opponents", "1", "1 = opponents only from characters with a Ghost profile"),
-    ("special_fights", "1", "1 = keep Treasure Battle's special fights (Turbo etc.), 0 = every fight is a regular fight"),
-    ("default_costumes", "0", "1 = opponents wear their default costume, 0 = the ghosts' own customised outfits"),
-    ("end_menu", "1", "1 = after each match: rematch, rematch on a new stage, 3 next opponents, character select, main menu"),
-    ("random_player", "0", "1 = each ghost imitates one random recorded player, 0 = the usual profile ([profiles], merged by default)"),
+    ("enabled", "1", "1 = on, 0 = off. Converts Treasure Battle into Ghost Battle - round counts affected by your Game Options, Random Stages every new match, and more."),
+    ("random_stage", "1", "1 = on, 0 = off. A new random stage every match (the game normally keeps one stage for five fights)."),
+    ("ghost_opponents", "1", "1 = on, 0 = off. Only queue characters that have Ghost data. Characters without Ghost data will never appear with this option ticked."),
+    ("special_fights", "0", "1 = on, 0 = off. Tick to allow the special fight encounters from the vanilla Treasure Battle mode (e.g. Turbo Mode and Boss Fights). Untick to disable these fights completely."),
+    ("default_costumes", "0", "1 = on, 0 = off. Force all opponents to use the character's default 1P Costume instead of customized outfits."),
+    ("end_menu", "1", "1 = on, 0 = off. Tick to enable Ghost Battle's custom end of match menu options (choose the next opponent, rematch with same stage, rematch on new stage, etc)"),
+    ("native_menu", "1", "1 = on, 0 = off. Show the end-of-match menu inside the game's own result window. 0 = the overlay menu instead."),
+    ("rename", "1", "1 = on, 0 = off. The main menu calls the mode GHOST BATTLE instead of TREASURE BATTLE."),
+    ("hide_chests", "1", "1 = on, 0 = off. No treasure chest icons on the match HUD (the results screen still shows your rewards)."),
+    ("random_player", "0", "1 = on, 0 = off. Tick to make it so every opponent you encounter is only based on ONE ghost profile. Ticking this option makes the opponents you encounter less intelligent overall, but more unique in playstyle (e.g. you may encounter two Paul opponents who play very differently). Recommended is unticked/disabled."),
 ]
 SCAN_NOTE = "; dev tool region: data = exe .data section, state = newest fight-state block"
 

@@ -29,8 +29,15 @@ struct Overlay
 	ULONGLONG forget_armed = 0;
 } g_ov;
 
+// the menu key also arrives as a window message: a second path next to the key state (deduplicated). (The
+// "F1 dead after the first native menu" bug of 2026-10-19 was a row-array overrun in gbmenu.hpp.)
+std::atomic<bool> g_menu_key_msg{ false };
+int menu_vk(); // the menu key's virtual key (defined with g_menu_key below)
+
 LRESULT CALLBACK overlay_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
+	if ((m == WM_KEYDOWN || m == WM_SYSKEYDOWN) && !(l & (1 << 30)) && int(w) == menu_vk())
+		g_menu_key_msg = true;
 	if (g_menu_open)
 	{
 		ImGui_ImplWin32_WndProcHandler(h, m, w, l);
@@ -45,6 +52,7 @@ std::wstring ini_path() { return g_dir + L"t7ghost.ini"; }
 
 // [ui] menu_key: a key name with optional modifiers, e.g. F1, Insert, Ctrl+F1, Shift+Home, P
 struct MenuKey { int vk = VK_F1; bool ctrl = false, shift = false, alt = false; std::string name = "F1"; } g_menu_key;
+int menu_vk() { return g_menu_key.vk; }
 
 void load_menu_key()
 {
@@ -170,11 +178,19 @@ bool overlay_init(IDXGISwapChain *sc)
 	return true;
 }
 
+// an option's explanation: dimmed, wrapped to the panel width
+void help(const char *text)
+{
+	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
+	ImGui::TextWrapped("%s", text);
+	ImGui::PopStyleColor();
+}
+
 // one labelled setting row: slider (or checkbox) + explanation underneath; returns true if changed
-bool setting_slider(const char *label, int &v, int lo, int hi, const char *fmt, const char *help)
+bool setting_slider(const char *label, int &v, int lo, int hi, const char *fmt, const char *text)
 {
 	const bool changed = ImGui::SliderInt(label, &v, lo, hi, fmt, ImGuiSliderFlags_AlwaysClamp);
-	ImGui::TextDisabled("%s", help);
+	help(text);
 	ImGui::Spacing();
 	return changed;
 }
@@ -232,7 +248,7 @@ void overlay_panel()
 	if (setting_slider("Guard skill", v, 0, 100, "%d %%", "how often attacks it sees are guarded correctly"))
 		c.guard_skill = v, save_int(L"guard_skill", v);
 	v = c.decision_skill;
-	if (setting_slider("Decision skill", v, 0, 100, "%d %%", "favour the player's attacks that landed over ones that whiffed or got hit"))
+	if (setting_slider("Decision skill", v, 0, 100, "%d %%", "How much the Ghosts favour attacks that are statistically proven to land more often than ones that whiffed or got counter-hit."))
 		c.decision_skill = v, save_int(L"decision_skill", v);
 	v = c.adapt;
 	if (setting_slider("Adapt to you", v, 0, 100, "%d %%", "how strongly it adapts to YOUR habits (remembered per character you use)"))
@@ -264,6 +280,7 @@ void overlay_panel()
 		ImGui::SameLine(200 * sc);
 		ImGui::TextColored(cols[st], "%s", names[st]);
 		static const char *types[] = { "wall", "balcony", "breakable wall" };
+		help("Tick to let the location of nearby walls influence the Ghost's behaviors. Ghosts will sidestep away from walls, defend near corners, pressure you against walls.");
 		if (w.state >= ghost::Brain::kWsCalm)
 		{
 			char mine[48] = "-", yours[48] = "-";
@@ -273,8 +290,6 @@ void overlay_panel()
 				snprintf(yours, sizeof yours, "%.1f m (%s)", w.opp_back / 1000.0f, types[std::clamp(w.opp_type, 0, 2)]);
 			ImGui::TextDisabled("behind it: %s   behind you: %s   %s", mine, yours, w.level);
 		}
-		else
-			ImGui::TextDisabled("sidesteps away from walls, defends corners, presses you into walls");
 	}
 	ImGui::Spacing();
 
@@ -283,30 +298,24 @@ void overlay_panel()
 	{
 		auto save_gb = [](const wchar_t *key, int v) { ini_set(L"ghost_battle", key, std::to_wstring(v)); };
 		bool g = c.ghost_battle, rs = c.gb_random_stage, go = c.gb_ghost_opponents, sf = c.gb_special_fights, dc = c.gb_default_costumes;
-		bool rp = c.gb_random_player, em = c.gb_end_menu;
-		if (ImGui::Checkbox("Enable Ghost Battle Mode", &g))
-			c.ghost_battle = g, save_gb(L"enabled", g);
-		ImGui::TextDisabled("Treasure Battle with the round count from your Game Options");
+		bool rp = c.gb_random_player, em = c.gb_end_menu, rn = c.gb_rename, hc = c.gb_hide_chests, nm = c.gb_native_menu;
+		const auto row = [&](const char *label, bool &v, bool &field, const wchar_t *key, const char *text) {
+			if (ImGui::Checkbox(label, &v))
+				field = v, save_gb(key, v);
+			help(text);
+		};
+		row("Enable Ghost Battle Mode", g, c.ghost_battle, L"enabled", "Converts Treasure Battle into Ghost Battle - round counts affected by your Game Options, Random Stages every new match, and more.");
 		ImGui::BeginDisabled(!c.ghost_battle);
-		if (ImGui::Checkbox("Random stage", &rs))
-			c.gb_random_stage = rs, save_gb(L"random_stage", rs);
-		ImGui::SameLine(200 * sc);
-		if (ImGui::Checkbox("Ghost opponents", &go))
-			c.gb_ghost_opponents = go, save_gb(L"ghost_opponents", go);
-		ImGui::TextDisabled("a new stage every fight; opponents only from characters with a Ghost profile");
-		if (ImGui::Checkbox("Special fights", &sf))
-			c.gb_special_fights = sf, save_gb(L"special_fights", sf);
-		ImGui::SameLine(200 * sc);
-		if (ImGui::Checkbox("Force default costumes", &dc))
-			c.gb_default_costumes = dc, save_gb(L"default_costumes", dc);
+		row("Random stage", rs, c.gb_random_stage, L"random_stage", "A new random stage every match (the game normally keeps one stage for five fights).");
+		row("Only enable Ghost AI Characters", go, c.gb_ghost_opponents, L"ghost_opponents", "Only queue characters that have Ghost data. Characters without Ghost data will never appear with this option ticked.");
+		row("Special fights", sf, c.gb_special_fights, L"special_fights", "Tick to allow the special fight encounters from the vanilla Treasure Battle mode (e.g. Turbo Mode and Boss Fights). Untick to disable these fights completely.");
+		row("Force default costumes", dc, c.gb_default_costumes, L"default_costumes", "Force all opponents to use the character's default 1P Costume instead of customized outfits.");
+		row("End-of-match menu", em, c.gb_end_menu, L"end_menu", "Tick to enable Ghost Battle's custom end of match menu options (choose the next opponent, rematch with same stage, rematch on new stage, etc)");
+		row("   Native look", nm, c.gb_native_menu, L"native_menu", "Show the end-of-match menu inside the game's own result window. Untick to use the overlay menu instead.");
+		row("Call it GHOST BATTLE", rn, c.gb_rename, L"rename", "The main menu calls the mode GHOST BATTLE instead of TREASURE BATTLE.");
+		row("Hide treasure chests", hc, c.gb_hide_chests, L"hide_chests", "No treasure chest icons on the match HUD (the results screen still shows your rewards).");
+		row("Random player per ghost", rp, c.gb_random_player, L"random_player", "Tick to make it so every opponent you encounter is only based on ONE ghost profile. Ticking this option makes the opponents you encounter less intelligent overall, but more unique in playstyle (e.g. you may encounter two Paul opponents who play very differently). Recommended is unticked/disabled.");
 		ImGui::EndDisabled();
-		ImGui::TextDisabled("Turbo and other special fights; default outfits instead of the ghosts' own");
-		if (ImGui::Checkbox("End-of-match menu", &em))
-			c.gb_end_menu = em, save_gb(L"end_menu", em);
-		ImGui::TextDisabled("rematch, new stage, choose the next opponent, character select, main menu");
-		if (ImGui::Checkbox("Random player per ghost", &rp))
-			c.gb_random_player = rp, save_gb(L"random_player", rp);
-		ImGui::TextDisabled("each ghost imitates one random recorded player (off = merged, or your choice below)");
 		if (gb::g_status[0])
 			ImGui::TextDisabled("%s", gb::g_status);
 	}
@@ -349,6 +358,13 @@ void overlay_panel()
 		save_int(L"input_read_chance", d.input_read_chance), save_int(L"punish", d.punish), save_int(L"combos", d.combos);
 		save_int(L"guard_skill", d.guard_skill), save_int(L"decision_skill", d.decision_skill), save_int(L"adapt", d.adapt);
 		save_int(L"throw_break_chance", d.throw_break), save_int(L"wall_awareness", d.wall_awareness);
+		// Ghost Battle Mode options too
+		const auto gb = [](const wchar_t *key, bool &field, bool v) { field = v, ini_set(L"ghost_battle", key, std::to_wstring(int(v))); };
+		gb(L"enabled", c.ghost_battle, d.ghost_battle), gb(L"random_stage", c.gb_random_stage, d.gb_random_stage);
+		gb(L"ghost_opponents", c.gb_ghost_opponents, d.gb_ghost_opponents), gb(L"special_fights", c.gb_special_fights, d.gb_special_fights);
+		gb(L"default_costumes", c.gb_default_costumes, d.gb_default_costumes), gb(L"end_menu", c.gb_end_menu, d.gb_end_menu);
+		gb(L"rename", c.gb_rename, d.gb_rename), gb(L"hide_chests", c.gb_hide_chests, d.gb_hide_chests);
+		gb(L"random_player", c.gb_random_player, d.gb_random_player), gb(L"native_menu", c.gb_native_menu, d.gb_native_menu);
 	}
 	ImGui::SameLine();
 	const bool armed = GetTickCount64() < g_ov.forget_armed;
@@ -476,8 +492,15 @@ bool overlay_install()
 // worker thread: hotkey, profile reloads, "forget my habits"
 void overlay_tick()
 {
-	if (menu_key_pressed())
+	static ULONGLONG last_toggle = 0;
+	const bool by_state = menu_key_pressed(), by_msg = g_menu_key_msg.exchange(false);
+	if ((by_state || by_msg) && GetTickCount64() - last_toggle > 300)
+	{
+		last_toggle = GetTickCount64();
 		g_menu_open = !g_menu_open;
+		logf("overlay: menu key (%s) -> panel %s (end-of-match menu state %d)", by_state ? "key state" : "window message",
+			g_menu_open ? "open" : "closed", int(gbm::g_state));
+	}
 	if (g_forget_habits.exchange(false))
 	{
 		// swap in a fresh brain first: the old one saves its habit model while it learns and could

@@ -86,23 +86,26 @@ def unique_recordings(recs):
 OPPONENT_SLOT = ("match", 0x11C, "8")  # online opponent name slot, keyed hash only
 
 
-_SELF = None
+_SELF = {}  # recordings folder -> {recording stem: own side}
 
 
 def self_side(rec):
     """Index (0 = p1, 1 = p2) of the recording player's own side. The slot follows the original
     match side, not the Battle Log card or the playback side, so it comes from self_sides.txt
-    (one line per replay, written by whoever harvested them) next to the replays folder; P1 if unlisted."""
-    global _SELF
-    if _SELF is None:
-        _SELF = {}
-        path = rec.path.parent.parent / "self_sides.txt"
-        if path.exists():
-            for line in path.read_text().splitlines():
-                parts = line.split("#")[0].split()
-                if len(parts) == 2:
-                    _SELF[parts[0]] = 0 if parts[1] == "p1" else 1
-    return _SELF.get(rec.path.stem, 0)
+    (one line per replay, written by whoever harvested them) next to the replays folder, or inside a
+    contributor's folder; P1 if unlisted. One list per recordings folder."""
+    d = rec.path.parent
+    if d not in _SELF:
+        sides = {}
+        for path in (d / "self_sides.txt", d.parent / "self_sides.txt"):
+            if path.exists():
+                for line in path.read_text().splitlines():
+                    parts = line.split("#")[0].split()
+                    if len(parts) == 2:
+                        sides[parts[0]] = 0 if parts[1] == "p1" else 1
+                break
+        _SELF[d] = sides
+    return _SELF[d].get(rec.path.stem, 0)
 
 
 PLACEHOLDER_CHARS = 4  # a name hash seen with this many different characters is not one player
@@ -179,9 +182,16 @@ def player_ids(rec):
         opp = None
     me = self_side(rec)
     ids = [None, None]
-    ids[me] = "self"
-    ids[1 - me] = f"opp:{opp}" if opp else None
+    # the first folder is the author's own replays ("self" = P01); every other replay folder is a
+    # contributor: their recording player is a new player, and their name codes use their own key,
+    # so their ids are kept per folder (2026-10-19, first volunteered data)
+    own = rec.path.parent.resolve() == _MAIN_DIR
+    ids[me] = "self" if own else f"self:{rec.path.parent}"
+    ids[1 - me] = (f"opp:{opp}" if own else f"opp:{rec.path.parent}:{opp}") if opp else None
     return tuple(ids)
+
+
+_MAIN_DIR = None  # the author's own replays (the first folder given)
 
 
 def main(rep_dirs, out_dir):
@@ -191,9 +201,14 @@ def main(rep_dirs, out_dir):
         old.unlink()
     # group sides by (player hash, character); unknown players stay one profile per replay side
     groups = collections.OrderedDict()
+    global _MAIN_DIR
+    _MAIN_DIR = Path(rep_dirs[0]).resolve()
     recs = unique_recordings([r for d in rep_dirs for r in load_dir(d)])
-    # replays first, then live matches: keeps the replay players' pseudonym numbers stable
-    recs.sort(key=lambda r: (r.path.name.startswith("live_"), r.path.name))
+    # folders in the order given (own replays, live data, contributors), replays before live in each:
+    # keeps every existing player's pseudonym number stable when new folders are added
+    order = {Path(d).resolve(): i for i, d in enumerate(rep_dirs)}
+    recs.sort(key=lambda r: (min((i for d, i in order.items() if d in r.path.resolve().parents), default=len(order)),
+                             r.path.name.startswith("live_"), r.path.name))
     _PLACEHOLDERS.clear()
     _PLACEHOLDERS.update(placeholder_hashes(recs))
     print(f"{len(_PLACEHOLDERS)} placeholder name hash(es) treated as unknown opponents")

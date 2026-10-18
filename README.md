@@ -22,6 +22,17 @@ your actual inputs rather than react to what it sees.
 
 Video demonstration of Katarina's Ghost AI (work in progress): https://streamable.com/447xkg
 
+### What's new in v0.7.2
+- **All the Ghosts in one public build**: 63 recorded players over **36 characters**, including the first
+  volunteered data (thank you!) - a Jin player and their opponents, with **Noctis** as a new character.
+- **Native end-of-match menu.** Ghost Battle's menu now lives in the game's own result window, in the
+  game's own style: *Rematch*, *Rematch on a new stage*, *Next opponent* (choose with left/right),
+  *Return to Character Select* and *Return to Main Menu*. Character Select takes you straight there.
+  The previous overlay menu is still available (untick *Native look* in F1).
+- The main menu calls the mode **GHOST BATTLE**.
+- **Hide treasure chests**: no chest icons on the match HUD (your rewards still show after the match).
+- New defaults: special fights off, chests hidden; options renamed and described more clearly.
+
 ### What's new in v0.6.3
 - **Ghost AI in Arcade Battle and Treasure Battle**, not just Practice - on either side of the screen.
   Characters without a Ghost profile keep the game's own CPU. Both can be switched off in the F1 menu.
@@ -80,11 +91,10 @@ observed by playing the replay back in-game.
 ## DOWNLOADING AND INSTALLING
 Available for download (see Releases):
 
-**The public tech demo** of the Ghost AI to try for yourself. Only the Katarina and Ganryu Ghosts are
-included. Drop the files into `TEKKEN 7\TekkenGame\Binaries\Win64` (next to the game exe), open
-Practice mode, set the opponent to "CPU" on "Ultra Hard", and pick Katarina or Ganryu as the opponent.
-Press F1 to tune the Ghost in real time. *(The current tech demo is v0.5.1; wall awareness arrives with
-the next tech demo build.)*
+**The public build** of the Ghost AI with every Ghost (36 characters). Drop the contents of its `Win64`
+folder into `TEKKEN 7\TekkenGame\Binaries\Win64` (next to the game exe), then play Ghost Battle (the
+reworked Treasure Battle), Arcade Battle, or Practice with the opponent set to "CPU" on "Ultra Hard".
+Press F1 to tune the Ghosts in real time. The package's README.txt explains everything.
 
 **The Data Harvesters**, if you want to help populate the character data: put the harvester's
 `version.dll` next to your game exe, then send me the Ghost Data folders it creates
@@ -134,6 +144,8 @@ See [docs/TECHNICAL.md](docs/TECHNICAL.md) for the memory layout, file formats, 
 | `src/walls.hpp` | wall maps: floors, wall breaks and live wall distances |
 | `src/overlay.hpp` | in-game settings panel (Dear ImGui on the game's D3D11 swap chain) |
 | `src/ghostbattle.hpp`, `src/gbmenu.hpp` | Ghost Battle Mode (Treasure Battle hooks) and its end-of-match menu |
+| `src/gbtext.hpp` | the GHOST BATTLE name on the main menu |
+| `src/menutrace.hpp` | dev-build recon tools for the game's Scaleform menus |
 | `src/harvest.cpp` | the shareable read-only harvesters (replay / live) |
 | `src/t7.hpp`, `src/names.hpp` | Tekken 7 memory layout; player-name pseudonymisation |
 | `analysis/` | Python: load recordings (replay and live), build profiles, frame data and wall maps |

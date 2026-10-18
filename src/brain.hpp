@@ -263,10 +263,13 @@ struct Settings
 	bool ghost_battle = true;   // Ghost Battle Mode: Treasure Battle with Game Options rounds (ghostbattle.hpp)
 	bool gb_random_stage = true;    //   a random stage every fight
 	bool gb_ghost_opponents = true; //   opponents with a Ghost profile
-	bool gb_special_fights = true;  //   keep Treasure's special fights (Turbo etc.); off = every fight regular
+	bool gb_special_fights = false; //   keep Treasure's special fights (Turbo etc.); off = every fight regular
 	bool gb_default_costumes = false; // force default costumes (off = the ranked ghosts' own outfits)
 	bool gb_random_player = false;  //   each ghost imitates one random recorded player (off = usual profile)
 	bool gb_end_menu = true;        //   end-of-match menu: rematch / new stage / next opponent x3 / ... (gbmenu.hpp)
+	bool gb_native_menu = true;     //   ...drawn in the game's own result window (off = the overlay)
+	bool gb_rename = true;          //   "TREASURE BATTLE" -> "GHOST BATTLE" in the menus (gbtext.hpp)
+	bool gb_hide_chests = true;     //   no treasure chest icons on the match HUD (results screen keeps them)
 };
 
 class Brain
