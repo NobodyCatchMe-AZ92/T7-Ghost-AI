@@ -1,80 +1,129 @@
 # T7-Ghost-AI
-This is a mod project to improve the AI opponents in Tekken 7. An AI profile is built for each character in the game based on recorded data from the matches of real players. This makes the AI behave like real players in movements, combo routes, favorite moves, and overall strategy.
+A mod project to improve the AI opponents in Tekken 7. An AI profile is built for each character from
+recorded data of real players' matches, so the AI behaves like real players: their movement, combo
+routes, favourite moves and overall strategy.
 
 ## INTRODUCTION
-This is a mod project to improve the AI opponents in Tekken 7. This will extend the playability of the game into the far future since we all know Tekken 7's vanilla AI is arguably the weakest in the whole series and very boring to fight.
+This mod is here to extend the playability of Tekken 7 far into the future - we all know Tekken 7's
+vanilla AI is arguably the weakest in the whole series and very boring to fight.
 
-The mod works similarly to the Ghosts in Tekken 8: an AI profile is built for each character in the game based on recorded data from the matches of real players. This makes the AI behave like real players in movements, combo routes, favorite moves, and overall strategy.
+The mod works similarly to the Ghosts in Tekken 8: an AI profile is built for each character based on
+recorded data from the matches of real players. This makes the AI behave like real players in
+movements, combo routes, favourite moves, and overall strategy - with sharp execution on top: it
+punishes what it blocks, punishes your whiffs, confirms its hits and breaks throws.
 
-You can adjust various parameters for the Ghost AI in realtime during a match: for example, set the percentage chance it has of breaking throws, or the chance it has to cheat and read your actual inputs rather than observe you visually.
+It also **learns you**. While you play, the Ghost notices your habits - how often you attack, how you
+get up, which of your moves it can punish or sidestep - and remembers them for next time, separately
+for every character you play.
+
+You can adjust the Ghost AI in real time during a match: press **F1** for the settings menu and, for
+example, set its reaction speed, its chance of breaking throws, or the chance it has to cheat and read
+your actual inputs rather than react to what it sees.
 
 Video demonstration of Katarina's Ghost AI (work in progress): https://streamable.com/447xkg
-     
+
+### What's new in v0.6
+- **Wall awareness.** Every stage in the game is mapped - all floors, balconies, breakable walls and
+  breakable floors. With its back to a wall the Ghost sidesteps away (guarding in between); backed into
+  a corner it defends harder and looks for a throw to escape; and when *your* back is to the wall it
+  presses you with heavy, wall-splatting moves. You can switch it off in the F1 menu.
+- **Live wall indicator** in the F1 menu showing what the Ghost currently thinks about the walls.
+- **Online matches as training data.** The new Live Harvester records matches you play or spectate.
+- **More data:** the profiles now come from about 110 matches (saved replays plus online matches),
+  and all players of a character are merged into one big profile by default.
+
 
 ## HELP THE MOD IMPROVE - COLLECT GHOST DATA AND SEND IT TO ME!
-I need help collecting DATA for the AI character profiles. The data I have been able to collect by myself has been extremely limited - only 60 matches - so a lot of characters and play styles are totally missed by the mod.
+I need help collecting DATA for the AI character profiles. What I could collect by myself is still very
+limited - around 110 matches - so a lot of characters and play styles are missing from the mod.
 
-Your data is totally anonymized - unique players are identified only with a special number value, never any identifying username or Steam ID. The default setting of the mod aggregates all collected data for a character - no matter the player - into one big character profile.
+Your data is anonymized - players are identified only by a code, never by a username or Steam ID. By
+default the mod merges all collected data for a character, no matter the player, into one big
+character profile.
 
 There are two ways you can help me collect data:
 
-
 #### Data Collection Method 1: Replay Harvester
-Install the Replay Harvester DLL into your game and watch your saved replays. You can press *ctrl+F8* to make the harvester automatically navigate the replay menu and go to the next replay (meaning you can walk away from the game and grab a coffee while you let some replays playback). Harvested data gets spat out into a folder next to your game exe called "t7GhostReplayData" which you then send to me
+Install the Replay Harvester DLL into your game and watch your saved replays. Press *Ctrl+F8* on the
+Battle Log with your first replay highlighted, and the harvester navigates the replay menu by itself
+and plays one replay after another (so you can walk away and grab a coffee while it runs; press
+*Ctrl+F8* again to stop it). Turn off the in-replay tips ("Recommended Combo" / "Recommended
+Punishment") first - they pause the replays. Harvested data goes into a folder next to your game exe
+called "t7GhostReplayData", which you then send to me.
 
-### Data Collection Method 2: Live Harvester
-Install the LIVE Harvester DLL into your game and play/spectate online matches like you normally would. Harvested data gets spat out into a folder next to your game exe called "t7GhostLIVEplayData" which you then send to me
+#### Data Collection Method 2: Live Harvester
+Install the LIVE Harvester DLL into your game and play or spectate online matches like you normally
+would. Harvested data goes into a folder next to your game exe called "t7GhostLIVEplayData", which you
+then send to me. Only human players help the Ghosts: online matches, spectating, and offline matches
+between two people are great - please **don't** send offline fights against the CPU.
 
-I did investigate a method of having people instead send me their t7 replay save files and converting them to work on my account, but that is a very risky effort and can cause corruption of my game install. Trying to read the raw data from those save files themselves would be fruitless since the AI needs to understand not just the stored player inputs from those files but also the in-engine reactions etc which can only be observed through in-game playback.
+I did look into having people send me their Tekken 7 replay save files instead, but loading another
+account's replay saves corrupts the save data, and reading those files directly wouldn't help anyway:
+the AI needs not just the stored inputs but how the game engine reacted to them, which can only be
+observed by playing the replay back in-game.
 
 
 ## DOWNLOADING AND INSTALLING
-Available for download are:
+Available for download (see Releases):
 
-A public tech demo of the Ghost AI you can try for yourself. Only Katarina and Ganryu AIs are included in this tech demo. You can tune their AI in realtime by pressing F1 to bring up the AI menu. Install by dropping the files in: TEKKEN 7\TekkenGame\Binaries\Win64 (next to the game exe). Then open practice mode, set the mode to "VS CPU", and set difficulty to Ultra Hard against Katarina or Ganryu.
-The Data Harvesters: if you want to help populate the character data for this mod, you install version.dll next to your game .exe and then send me the Ghost Data folders that get generated (t7GhostLIVEplayData and t7GhostReplayData - NEVER send the folder "t7GhostHarvest_private"). Use the Replay Harvester to harvest character data while you watch your saved replays, use the Live Harvester to harvest data while you play online VS matches. 
+**The public tech demo** of the Ghost AI to try for yourself. Only the Katarina and Ganryu Ghosts are
+included. Drop the files into `TEKKEN 7\TekkenGame\Binaries\Win64` (next to the game exe), open
+Practice mode, set the opponent to "CPU" on "Ultra Hard", and pick Katarina or Ganryu as the opponent.
+Press F1 to tune the Ghost in real time. *(The current tech demo is v0.5.1; wall awareness arrives with
+the next tech demo build.)*
 
+**The Data Harvesters**, if you want to help populate the character data: put the harvester's
+`version.dll` next to your game exe, then send me the Ghost Data folders it creates
+(t7GhostLIVEplayData and t7GhostReplayData). Use the Replay Harvester while you watch your saved
+replays, and the Live Harvester while you play or spectate online matches.
 
-### Please send all volunteered Ghost Data to the email address: DreamOfCasinoSoul@proton.me 
+### Please send all volunteered Ghost Data to the email address: DreamOfCasinoSoul@proton.me
 
 OR upload to mediafire and send the link in this mod page's comments.
-NEVER upload the folder "t7GhostHarvest_private". This contains data that COULD reveal your Steam username. The other folders are completely anonymized; the data you send to me doesn't reveal anything about you, your PC, or your Steam account.
 
+**NEVER send the folder "t7GhostHarvest_private".** It holds the secret key that turns player names
+into the anonymous codes in your data - with that key, someone could check guessed names against the
+codes. The data folders themselves contain only gameplay (moves, positions, health, inputs) with
+players as codes: nothing about you, your PC or your Steam account.
 
-
-PLEASE HELP MAKE THIS MOD BETTER! IT DEPENDS ON BEING FED LOTS OF DATA - WHICH I CAN'T DO ALONE! We can improve the Tekken 7 offline experience into something truly fun, starting with this mod!
+PLEASE HELP MAKE THIS MOD BETTER! IT DEPENDS ON BEING FED LOTS OF DATA - WHICH I CAN'T DO ALONE! We can
+improve the Tekken 7 offline experience into something truly fun, starting with this mod!
 
 Thank you!
 
 
-
-
 ## How it works (short)
 
-1. **Recording.** A `version.dll` proxy loaded by the game reads the game's per-frame fight-state
-   snapshots while replays play back, and writes them as JSONL (moves, frame data, stun, positions,
-   health, inputs). It only reads memory.
-2. **Profiles.** The Python pipeline in `analysis/` cuts each player's play into decisions ("chunks":
-   what they did in which situation, at which distance, with which frame advantage) and learns move
-   frame data from the replays.
-3. **Playing.** In Practice, with the dummy set to CPU on Ultra Hard, the mod drives the opponent from
-   the profile: it picks the recorded player's own choices for the situation, punishes what it blocked,
-   continues juggles with the player's combos, and learns your habits as you play.
+1. **Recording.** A `version.dll` proxy loaded by the game reads the game's per-frame fight state while
+   replays play back (or while you play online, with the Live Harvester) and writes it to text files:
+   moves, frame data, stun, positions, health, inputs. It only reads memory.
+2. **Profiles.** The Python pipeline in `analysis/` cuts each player's play into decisions - what they
+   did in which situation, at which distance and frame advantage, with how much life and rage - and
+   learns every move's frame data (speed, damage, reach, block and hit advantage) from the recordings.
+3. **Playing.** In Practice, with the opponent set to CPU on Ultra Hard, the mod takes over the
+   opponent's controller. Each frame it sees the fight through a short reaction delay and picks the
+   recorded players' own choice for the situation - and on top: buffered punishes from learned frame
+   data, whiff punishes (dashing in when needed), juggles with the players' own combos, hit-confirms,
+   throw breaks, and what it has learned about you.
+4. **Walls.** Every stage was mapped by walking along all of its walls in Practice. The Ghost knows at
+   every moment which floor each fighter is on, which walls have been broken this round, and how far
+   each fighter's back is from a wall - and plays accordingly.
 
-See [docs/TECHNICAL.md](docs/TECHNICAL.md) for the memory layout, file formats and pipeline.
+See [docs/TECHNICAL.md](docs/TECHNICAL.md) for the memory layout, file formats, wall maps and pipeline.
 
 ## Repository layout
 
 | Path | What |
 |---|---|
 | `src/main.cpp` | the mod: loader thread, input hook, recorder, settings, hotkeys |
-| `src/brain.hpp`, `src/adapt.hpp` | the AI: profile playback, punishing, guarding, live adaptation |
+| `src/brain.hpp`, `src/adapt.hpp` | the AI: profile playback, punishing, guarding, live adaptation, wall behaviour |
+| `src/walls.hpp` | wall maps: floors, wall breaks and live wall distances |
 | `src/overlay.hpp` | in-game settings panel (Dear ImGui on the game's D3D11 swap chain) |
 | `src/harvest.cpp` | the shareable read-only harvesters (replay / live) |
 | `src/t7.hpp`, `src/names.hpp` | Tekken 7 memory layout; player-name pseudonymisation |
-| `analysis/` | Python: load recordings, build profiles and frame data |
-| `tools/` | ini writer, replay auto-pilot, memory peek/sampler helpers |
-| `dist/t7ghost.ini` | default settings shipped with releases |
+| `analysis/` | Python: load recordings (replay and live), build profiles, frame data and wall maps |
+| `tools/` | ini writer, wall-survey checker, replay auto-pilot, memory peek/sampler helpers |
+| `dist/t7ghost.ini`, `dist/walls.txt` | default settings and the stage wall maps shipped with releases |
 | `third_party/` | MinHook (BSD-2), Dear ImGui (MIT) |
 
 ## Building
@@ -86,11 +135,12 @@ build.bat           -> build\version.dll (dev build) and build\public\version.dl
 build_harvest.bat   -> build\harvest_replay\version.dll and build\harvest_live\version.dll
 ```
 
-Profiles (Python 3.12, standard library only):
+Profiles and maps (Python 3.12, standard library only):
 
 ```
-py analysis/build_profiles.py <recordings dir> <profiles out dir>
-py analysis/framedata.py      <recordings dir> <framedata.txt>
+py analysis/build_profiles.py <recordings dir> [<more dirs, e.g. live data>] <profiles out dir>
+py analysis/framedata.py      <recordings dir> [<more dirs>] <framedata.txt>
+py analysis/build_walls.py    <walls_survey.txt> <walls.txt>
 ```
 
 ## Privacy

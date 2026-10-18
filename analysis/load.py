@@ -71,6 +71,8 @@ def load(path, min_round_frames=120):
             cur.frames.append(row)
     if cur.frames:
         rounds.append(cur)
+    if Path(path).name.startswith("live_"):
+        return _live_recording(path, rounds, probes, min_round_frames)
     # Loading a replay first fast-simulates every round (Replays & Tips analysis), which the ring
     # recorder samples with gaps, then plays them in real time. Keep only near-complete segments:
     # coverage = recorded frames / frame span. The trailing post-match idle segment is short.
@@ -92,6 +94,39 @@ def load(path, min_round_frames=120):
             best[k] = i
     rounds = [rounds[i] for i in sorted(best.values())]
     return Recording(Path(path), rounds, probes) if rounds else None
+
+
+LIVE_FILL_MAX = 4  # live: frame gaps up to this size are filled by repeating the previous frame
+
+
+def _live_recording(path, rounds, probes, min_round_frames):
+    """Live (online) recordings have no replay fast pass, but the ring recorder misses single frames
+    when the game simulates several frames between polls (rollback). Fill those small gaps with
+    copies of the previous frame (timing stays exact; held inputs/states persist), drop segments
+    with a larger hole, and keep only segments where someone lost health (real rounds, not intros,
+    KO slow-motion or transitions)."""
+    out = []
+    for r in rounds:
+        filled = [r.frames[0]]
+        ok = True
+        for fr in r.frames[1:]:
+            gap = fr["f"] - filled[-1]["f"]
+            if gap <= 0:
+                continue  # stale/repeated frame
+            if gap > LIVE_FILL_MAX:
+                ok = False
+                break
+            for k in range(1, gap):
+                filled.append(dict(filled[-1], f=filled[-1]["f"] + 1))
+            filled.append(fr)
+        if not ok or len(filled) < min_round_frames:
+            continue
+        hp = [(int(f["p1"].get("hp", 0)), int(f["p2"].get("hp", 0))) for f in filled]
+        if min(h[0] for h in hp) >= hp[0][0] and min(h[1] for h in hp) >= hp[0][1]:
+            continue  # nobody took damage: not a fought round
+        r.frames = filled
+        out.append(r)
+    return Recording(Path(path), out, probes) if out else None
 
 
 def is_practice(rec):

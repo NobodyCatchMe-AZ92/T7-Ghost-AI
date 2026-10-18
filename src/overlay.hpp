@@ -242,6 +242,34 @@ void overlay_panel()
 	ImGui::TextDisabled("punish what it can; continue juggles with the player's own combos");
 	ImGui::Spacing();
 
+	// wall awareness: switch + what the AI currently thinks about walls
+	bool wa = c.wall_awareness;
+	if (ImGui::Checkbox("Wall awareness", &wa))
+		c.wall_awareness = wa, save_int(L"wall_awareness", wa);
+	{
+		const auto &w = b->wall_info;
+		static const char *names[] = { "off", "no walls on this stage", "not concerned about walls",
+			"back to the wall - getting out", "cornered - defensive, looking for a throw", "you're at the wall - pressing" };
+		static const ImVec4 cols[] = { ImVec4(0.6f, 0.6f, 0.6f, 1), ImVec4(0.6f, 0.6f, 0.6f, 1), ImVec4(0.75f, 0.85f, 0.75f, 1),
+			ImVec4(0.95f, 0.75f, 0.3f, 1), ImVec4(0.95f, 0.45f, 0.3f, 1), ImVec4(0.45f, 0.75f, 1.0f, 1) };
+		const int st = std::clamp(w.state, 0, 5);
+		ImGui::SameLine(200 * sc);
+		ImGui::TextColored(cols[st], "%s", names[st]);
+		static const char *types[] = { "wall", "balcony", "breakable wall" };
+		if (w.state >= ghost::Brain::kWsCalm)
+		{
+			char mine[48] = "-", yours[48] = "-";
+			if (w.my_back >= 0 && w.my_back < 1e8f)
+				snprintf(mine, sizeof mine, "%.1f m (%s)", w.my_back / 1000.0f, types[std::clamp(w.my_type, 0, 2)]);
+			if (w.opp_back >= 0 && w.opp_back < 1e8f)
+				snprintf(yours, sizeof yours, "%.1f m (%s)", w.opp_back / 1000.0f, types[std::clamp(w.opp_type, 0, 2)]);
+			ImGui::TextDisabled("behind it: %s   behind you: %s   %s", mine, yours, w.level);
+		}
+		else
+			ImGui::TextDisabled("sidesteps away from walls, defends corners, presses you into walls");
+	}
+	ImGui::Spacing();
+
 	// profiles per character
 	if (!g_ov.choices.empty() && ImGui::CollapsingHeader("Who it imitates"))
 	{
@@ -274,11 +302,11 @@ void overlay_panel()
 		const ghost::Settings d{};
 		c.enabled = d.enabled, c.reaction_frames = d.reaction_frames, c.input_read_chance = d.input_read_chance;
 		c.punish = d.punish, c.combos = d.combos, c.guard_skill = d.guard_skill, c.decision_skill = d.decision_skill;
-		c.adapt = d.adapt, c.throw_break = d.throw_break;
+		c.adapt = d.adapt, c.throw_break = d.throw_break, c.wall_awareness = d.wall_awareness;
 		save_int(L"mod_enabled", d.enabled), save_int(L"reaction_frames", d.reaction_frames);
 		save_int(L"input_read_chance", d.input_read_chance), save_int(L"punish", d.punish), save_int(L"combos", d.combos);
 		save_int(L"guard_skill", d.guard_skill), save_int(L"decision_skill", d.decision_skill), save_int(L"adapt", d.adapt);
-		save_int(L"throw_break_chance", d.throw_break);
+		save_int(L"throw_break_chance", d.throw_break), save_int(L"wall_awareness", d.wall_awareness);
 	}
 	ImGui::SameLine();
 	const bool armed = GetTickCount64() < g_ov.forget_armed;

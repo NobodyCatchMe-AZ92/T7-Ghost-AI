@@ -26,7 +26,7 @@ BIN = 250            # projection histogram bin width
 EDGE_FRAC = 0.002   # a bin is "occupied" if it holds >= this fraction of all positions
 GAP_BINS = 2         # more than this many sparse bins in a row ends the main arena
 BEYOND = 1500        # this far past a wall means it broke
-INFINITE = {3, 40}   # Arctic Snowfall, Infinite Azure (confirmed in play)
+INFINITE = {3, 40, 55}   # Arctic Snowfall, Infinite Azure day + night (confirmed in play)
 
 
 def directions(n=N_DIRS):

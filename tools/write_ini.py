@@ -9,7 +9,7 @@ defaults below are written (release template).
 import configparser
 import sys
 
-VERSION = "0.5.1"  # keep in step with T7_VERSION_STR in src/main.cpp
+VERSION = "0.6"  # keep in step with T7_VERSION_STR in src/main.cpp
 DOWNLOAD = ". . . "  # pending: the download link for updates
 
 # (key, default, explanation)
@@ -23,6 +23,8 @@ AI = [
     ("decision_skill", "60", "0-100: favour the player's attacks that landed (hit/counter/launch) over whiffs and stuffed moves"),
     ("adapt", "70", "0-100: how strongly the AI adapts to YOUR habits learned during play (kept per character you use)"),
     ("throw_break_chance", "0", "throw breaks: 0 = each player's own break rate from the replays (most ~5-15%), 1 = never, 2-100 = % chance (100 = always)"),
+    ("wall_awareness", "1", "1 = walls change how it plays: sidesteps away from walls, defends corners (and throws out of them),\n"
+                            "; presses you harder with heavy moves when your back is to a wall. 0 = off (if it plays strangely)"),
 ]
 PROFILES_NOTE = ("; per character id: c21=merged (default: all recorded players as one),\n"
                  "; c21=hybrid (best player's style, other players fill gaps + share punishes/combos), or c21=Katarina-P01 (that player only)")

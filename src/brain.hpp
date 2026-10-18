@@ -3,6 +3,7 @@
 #pragma once
 #include "t7.hpp"
 #include "adapt.hpp"
+#include "walls.hpp"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -194,6 +195,8 @@ struct Snap
 	int32_t move_id, move_timer, attack_type, recovery, simple, stun, startup, hit, hp, rage_fx, char_id;
 	int32_t startup_end; // last active frame (ring only)
 	int32_t throw_tech;  // +0x450, low byte: 0x1D idle; grabbed by a throw: 0x1C break 1, 0x1E break 1+2, 0x1F break 2
+	float px, py, pz;    // +0x1610.. continuous root position (wall awareness)
+	int32_t side;        // +0x123C screen side
 	int age;             // frames since this move started (set by the brain; ring fields lag at first)
 	float distance;
 	bool valid;
@@ -210,7 +213,8 @@ inline Snap snap(uintptr_t obj, uintptr_t ring_pl)
 		t7::rd(obj + 0x39C, s.recovery) && t7::rd(obj + 0x428, s.simple) && t7::rd(obj + 0x42C, s.stun) &&
 		t7::rd(obj + 0x3D8, s.hit) && t7::rd(obj + 0x1450, s.distance) &&
 		t7::rd(obj + 0x1508, s.hp) && t7::rd(obj + 0x8E0, s.rage_fx) && t7::rd(obj + 0xDC, s.char_id) &&
-		t7::rd(obj + 0x450, s.throw_tech);
+		t7::rd(obj + 0x450, s.throw_tech) && t7::rd(obj + 0x1610, s.px) && t7::rd(obj + 0x1614, s.py) &&
+		t7::rd(obj + 0x1618, s.pz) && t7::rd(obj + 0x123C, s.side);
 	s.attack_type = at;
 	s.startup = s.startup_end = 0;
 	if (ring_pl)
@@ -249,6 +253,7 @@ struct Settings
 	int decision_skill = 60;    // 0-100: favour the player's attacks that landed over ones that whiffed/got hit
 	int adapt = 70;             // 0-100: how strongly the AI adapts to the human's habits learned in play
 	int throw_break = 0;        // 0 = the player's own break rate (profile), 1 = never, 2-100 = % chance
+	bool wall_awareness = true; // walls change how it plays (stage maps in walls.txt)
 };
 
 class Brain
@@ -257,6 +262,10 @@ public:
 	Settings cfg;
 	std::unordered_map<int, Profile> profiles; // by character id
 	FrameData framedata;                       // every character's moves, learned from replays
+	walls::Map wallmap;                        // per-stage wall maps (walls.txt)
+	// wall awareness status (shown in the settings panel)
+	enum WallState { kWsOff, kWsNoWalls, kWsCalm, kWsBack, kWsCornered, kWsPress };
+	struct WallInfo { int state = kWsOff; float my_back = -1, opp_back = -1; int my_type = 0, opp_type = 0; const char *level = ""; } wall_info;
 	// frames we had after blocking each opponent move, measured live (and saved via on_learn)
 	std::unordered_map<uint32_t, std::vector<int>> learned;
 	void (*on_learn)(uint32_t key, int frames) = nullptr;
@@ -373,6 +382,8 @@ public:
 					grab_watch_ = false, last_event = "throw not broken", dbg.decided = true;
 			}
 		}
+		wall_update(me, opp);
+		sidestep_learn(me, opp);
 		if (me.rage_fx) rage_seen_[0] = frame_;
 		if (opp.rage_fx) rage_seen_[1] = frame_;
 
@@ -1029,6 +1040,178 @@ private:
 		dbg.decided = true;
 	}
 
+	// ---- wall awareness
+	walls::Tracker wt_;
+	bool round_full_ = true, wall_press_ = false;
+	int64_t last_wall_move_ = -1000;
+	static constexpr float kBackDist = 2500;   // own back this close to a wall: back to the wall
+	static constexpr float kPressDist = 3000;  // opponent's back this close: press them into it
+	static constexpr float kCornerDist = 2500; // two different walls this close: cornered
+	// sidestep direction learning: does an 'up' tap move us to the left or right of our facing?
+	int u_sign_[2] = { 0, 0 };                 // per screen side: +1 / -1, 0 = not learned yet
+	int ws_pending_ = -1, ws_logged_ = -1;
+	int64_t ws_since_ = 0;
+	char ws_note_[160] = "";
+	struct StepLearn { bool on = false; float x = 0, z = 0, fx = 0, fz = 0; int key_up = 0, side = 0; int64_t t0 = 0; } sl_;
+
+	void wall_update(const Snap &me, const Snap &opp)
+	{
+		WallInfo w;
+		if (!cfg.wall_awareness)
+		{
+			wall_info = w;
+			return;
+		}
+		wt_.set_stage(wallmap, t7::read_global(t7::kStageId));
+		const bool full = me.hp >= 100 && opp.hp >= 100; // both at full health = a new round has started
+		if (full && !round_full_)
+			wt_.reset_round();
+		round_full_ = full;
+		wt_.observe(me.px, me.py, me.pz);
+		wt_.observe(opp.px, opp.py, opp.pz);
+		if (!wt_.active())
+		{
+			w.state = kWsNoWalls;
+			wall_info = w;
+			return;
+		}
+		const int lm = wt_.level_for(me.py), lo = wt_.level_for(opp.py);
+		const walls::Phase *pm = wt_.current(lm), *po = wt_.current(lo);
+		w.level = (*wt_.levels)[lm].name.c_str();
+		float dx = me.px - opp.px, dz = me.pz - opp.pz;
+		const float L = std::sqrt(dx * dx + dz * dz);
+		if (!pm || !po || L < 1)
+		{
+			w.state = kWsCalm;
+			wall_info = w;
+			return;
+		}
+		dx /= L, dz /= L; // from the opponent towards us = our back
+		const walls::Edge *hm = nullptr, *ho = nullptr;
+		w.my_back = pm->inside(me.px, me.pz) <= 0 ? 0 : pm->ray(me.px, me.pz, dx, dz, &hm);
+		w.opp_back = po->inside(opp.px, opp.pz) <= 0 ? 0 : po->ray(opp.px, opp.pz, -dx, -dz, &ho);
+		w.my_type = hm ? hm->type : 0, w.opp_type = ho ? ho->type : 0;
+		// cornered: two walls facing different ways are both close
+		float a0 = 1e9f;
+		bool cornered = false;
+		for (const auto &e : pm->e)
+		{
+			const float ex = e.bx - e.ax, ez = e.bz - e.az, el = std::sqrt(ex * ex + ez * ez);
+			if (el < 300)
+				continue;
+			float t = ((me.px - e.ax) * ex + (me.pz - e.az) * ez) / (el * el);
+			t = std::clamp(t, 0.0f, 1.0f);
+			const float cx = e.ax + ex * t - me.px, cz = e.az + ez * t - me.pz;
+			if (cx * cx + cz * cz > kCornerDist * kCornerDist)
+				continue;
+			const float ang = std::atan2(ez, ex);
+			if (a0 > 1e8f)
+				a0 = ang;
+			else if (std::fabs(std::remainder(ang - a0, 6.2831853f)) > 0.87f) // > 50 degrees apart
+				cornered = true;
+		}
+		const bool back = w.my_back < kBackDist, press = w.opp_back < kPressDist;
+		if (back && (!press || w.my_back <= w.opp_back))
+			w.state = cornered ? kWsCornered : kWsBack;
+		else if (press)
+			w.state = kWsPress;
+		else
+			w.state = kWsCalm;
+		wall_info = w;
+		// trace: state changes that stick for 10 frames
+		if (w.state != ws_pending_)
+			ws_pending_ = w.state, ws_since_ = frame_;
+		else if (w.state != ws_logged_ && frame_ - ws_since_ >= 10)
+		{
+			ws_logged_ = w.state;
+			static const char *n[] = { "off", "no walls", "calm", "back to the wall", "cornered", "pressing - you at the wall" };
+			snprintf(ws_note_, sizeof ws_note_, "wall: %s (behind me %.1f m, behind you %.1f m, %s)", n[w.state],
+				w.my_back / 1000.0f, w.opp_back / 1000.0f, w.level);
+			last_event = ws_note_, dbg.decided = true;
+		}
+	}
+
+	// learn which way an up-tap sidestep goes: lateral movement relative to facing ~15 frames later
+	void sidestep_learn(const Snap &me, const Snap &opp)
+	{
+		if (!sl_.on || frame_ - sl_.t0 < 15)
+			return;
+		sl_.on = false;
+		const float mx = me.px - sl_.x, mz = me.pz - sl_.z;
+		const float cr = sl_.fx * mz - sl_.fz * mx; // > 0 = moved to the left of facing
+		const float along = sl_.fx * mx + sl_.fz * mz;
+		if (std::fabs(cr) < 500 || std::fabs(cr) < 1.5f * std::fabs(along))
+			return; // not a clear sidestep (interrupted, walked or dashed instead): learn nothing
+		const int s = (cr > 0) == (sl_.key_up != 0) ? 1 : -1;
+		const int side = std::clamp(sl_.side, 0, 1);
+		if (u_sign_[side] != s)
+			u_sign_[side] = s, last_event = "wall: learned sidestep direction", dbg.decided = true;
+	}
+
+	// sidestep towards the side with more room; returns false if both sides are tight
+	bool sidestep_away(const Snap &me, const Snap &opp, const walls::Phase *ph)
+	{
+		float fx = opp.px - me.px, fz = opp.pz - me.pz;
+		const float L = std::sqrt(fx * fx + fz * fz);
+		if (L < 1 || !ph)
+			return false;
+		fx /= L, fz /= L;
+		const float left = ph->ray(me.px, me.pz, -fz, fx), right = ph->ray(me.px, me.pz, fz, -fx);
+		if (std::max(left, right) < 1500)
+			return false;
+		const int want = left > right ? 1 : -1; // +1 = to our left
+		const int side = std::clamp(me.side, 0, 1);
+		const int us = u_sign_[side] ? u_sign_[side] : (side == 0 ? 1 : -1); // guess until learned
+		const bool up = want == us;
+		std::vector<uint32_t> in(16, 0);
+		in[3] = up ? U : D; // the players' sidestep: 3+ neutral frames, then a 1-frame tap (holding up for
+		                    // 3 frames is a hop; a tap straight out of holding back joins the back-walk)
+		sl_ = { true, me.px, me.pz, fx, fz, up ? 1 : 0, me.side, frame_ };
+		play(in, true, left > right ? "wall: sidestep away (left)" : "wall: sidestep away (right)", kNeutral);
+		return true;
+	}
+
+	bool is_throw(const Profile &p, const Chunk &c) const
+	{
+		const auto it = framedata.find(move_key(p.char_id, c.first_move));
+		return it != framedata.end() && it->second.level == 10;
+	}
+
+	// step 4 bias from walls; true = it already chose
+	bool wall_choice(const Profile &p, const Snap &me, const Snap &opp, int sit, int dist)
+	{
+		wall_press_ = false;
+		const int st = wall_info.state;
+		if (st == kWsBack || st == kWsCornered)
+		{
+			neutral_mult_ *= st == kWsCornered ? 1.6f : 1.3f; // guard and move more, commit less
+			attack_mult_ *= st == kWsCornered ? 0.7f : 0.85f;
+			if (sit != kSitNeutral || cls(me) != Cls::free || frame_ - last_wall_move_ < 45)
+				return false;
+			if (st == kWsCornered && me.distance < 1200 && int(rng_() % 100) < 40) // within throw range
+			{
+				const bool rage = in_rage(0, me);
+				if (auto c = sample(p, [&](const Chunk &c) { return c.kind == kAttack && c.sit == kSitNeutral && (!c.rage || rage) && is_throw(p, c); }))
+				{
+					last_wall_move_ = frame_;
+					play_chunk(*c, false, "wall: throw out of the corner");
+					return true;
+				}
+			}
+			if (int(rng_() % 100) < (st == kWsCornered ? 45 : 30) && sidestep_away(me, opp, wt_.current(wt_.level_for(me.py))))
+			{
+				last_wall_move_ = frame_;
+				return true;
+			}
+		}
+		else if (st == kWsPress)
+		{
+			attack_mult_ *= 1.5f, neutral_mult_ *= 0.7f;
+			wall_press_ = true; // heavy hitters (big damage / launchers) are favoured: they splat
+		}
+		return false;
+	}
+
 	// weight of a chunk when sampling: the player's own choices, tilted toward what worked
 	float weight(const Chunk &c) const
 	{
@@ -1036,7 +1219,8 @@ private:
 			return neutral_mult_;
 		if (c.kind != kAttack)
 			return 1.0f;
-		return attack_mult_ * (favour_fast_ ? (c.startup > 0 && c.startup <= 12 ? 1.3f : 0.7f) : 1.0f) * base_weight(c);
+		const float power = wall_press_ ? 1.0f + std::min(2.0f, c.damage / 25.0f) + (c.outcome == kJuggle ? 0.5f : 0.0f) : 1.0f;
+		return attack_mult_ * power * (favour_fast_ ? (c.startup > 0 && c.startup <= 12 ? 1.3f : 0.7f) : 1.0f) * base_weight(c);
 	}
 	float base_weight(const Chunk &c) const
 	{
@@ -1175,7 +1359,8 @@ private:
 		//    a punish window or a perceived low re-decides quickly. Rate = player's guard habit.
 		const bool pressure = frame_ - last_seen_attack_ <= kPressureFrames;
 		if (seen.move_id != guard_roll_move_)
-			guard_roll_move_ = seen.move_id, guard_roll_ok_ = int(rng_() % 100) < cfg.guard_skill * std::max(p.guard_rate, 0.6f);
+			guard_roll_move_ = seen.move_id, guard_roll_ok_ = int(rng_() % 100) <
+				cfg.guard_skill * std::max(p.guard_rate, 0.6f) + (wall_info.state == kWsCornered ? 15 : 0);
 		if ((sit == kOppStartup || pressure) && sit != kOppJuggled && sit != kOppDown && guard_roll_ok_)
 		{
 			const bool low = cls(seen) == Cls::attack && seen.attack_type == 1;
@@ -1186,6 +1371,8 @@ private:
 		// 4. the player's own choice for this situation, preferring the same distance, life lead and
 		//    rage state; back off one condition at a time
 		if (adapt_choice(p, me, sit))
+			return;
+		if (wall_choice(p, me, opp, sit, dist))
 			return;
 		// frame advantage first (minus: guard/evade like the player did; plus: their pressure), then
 		// distance, then life lead and rage; back off one condition at a time

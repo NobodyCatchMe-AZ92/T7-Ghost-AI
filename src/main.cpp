@@ -37,7 +37,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 
 namespace {
 
-#define T7_VERSION_STR "0.5.1" // keep in step with the t7ghost.ini header (tools/write_ini.py)
+#define T7_VERSION_STR "0.6" // keep in step with the t7ghost.ini header (tools/write_ini.py)
 constexpr const char *kModVersion = T7_VERSION_STR;
 std::wstring g_dir; // .../Win64/t7ghost/
 FILE *g_log = nullptr;
@@ -465,6 +465,7 @@ ghost::Brain *load_brain()
 	b->cfg.decision_skill = std::clamp(geti(L"ai", L"decision_skill", 60), 0, 100);
 	b->cfg.adapt = std::clamp(geti(L"ai", L"adapt", 70), 0, 100);
 	b->cfg.throw_break = std::clamp(geti(L"ai", L"throw_break_chance", 0), 0, 100);
+	b->cfg.wall_awareness = geti(L"ai", L"wall_awareness", 1) != 0;
 
 	// profiles/index.txt lists "<char> <name> <frames>" best-first; [profiles] c<char>=<name> overrides
 	const std::wstring dir = g_dir + L"profiles/";
@@ -556,6 +557,10 @@ ghost::Brain *load_brain()
 		}
 		logf("ai: learned: blocked char %u move %u -> %d frames to act", key >> 16, key & 0xFFFF, frames);
 	};
+	if (b->wallmap.load(g_dir + L"walls.txt"))
+		logf("brain: wall maps for %zu stages (wall awareness %s)", b->wallmap.stages.size(), b->cfg.wall_awareness ? "on" : "off");
+	else
+		logf("brain: no walls.txt (wall awareness has no maps)");
 	if (ghost::load_framedata(g_dir + L"framedata.txt", b->framedata))
 		logf("brain: frame data for %zu moves", b->framedata.size());
 	else

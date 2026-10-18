@@ -38,7 +38,7 @@ newest copy every 2 ms gives every frame, also during replay fast-forward (with 
 | px / py / pz | `0x1610` / `0x1614` / `0x1618` | continuous root position |
 | startup / startup_end | `0x7780` / `0x7784` | ring copies only; one frame behind on a new move |
 
-**Globals:** game mode `exe + 0x34D67A8` (0 menus, 2 Practice and offline VS, 3 replay), Practice dummy
+**Globals:** game mode `exe + 0x34D67A8` (0 menus, 1 online, 2 Practice and offline VS, 3 replay), Practice dummy
 is CPU `exe + 0x3447820`, Practice CPU level `exe + 0x3447834` (4 = Ultra Hard), stage id
 `exe + 0x34DF550` (ids in `analysis/stages.py`).
 
@@ -93,3 +93,49 @@ input. Changes go to the running AI and to `t7ghost.ini` (WritePrivateProfileStr
 The recorder alone, with no hooks: replay variant (records while game mode = 3, optional
 auto-navigation through the Battle Log with Ctrl+F8) and live variant (any non-replay fight; writes
 frames 6 behind the newest because online fights roll back).
+
+## Live (online) recordings
+
+The live harvester records any non-replay fight. Online fights roll back, and the recorder misses single
+frames now and then; the loader fills gaps of up to 4 frames by repeating the previous frame (timing
+stays exact), drops segments with bigger holes, and keeps only segments where someone lost health.
+Practice sessions in the same mode id are dropped (no KO, health refills). Which side the recording
+player was, and optional same-person tags for other players, come from a hand-written
+`my_matches.txt` next to the files (`<file> ... <P1|P2|-|?> <L tag> <R tag>`); untagged fighters stay
+anonymous, one per match.
+
+## Wall maps (`walls.txt`, `analysis/build_walls.py`, `src/walls.hpp`)
+
+Built from Practice laps along every wall (root positions logged by the dev build). Per stage and
+level (floor height) and per break phase, the outline is the convex hull of dense position cells, in
+root coordinates (distance 0 = pinned against the wall).
+
+```
+infinite <stage>                                  no walls (Arctic Snowfall, Infinite Azure)
+alias <stage> <stage>                             same layout (day/night variants, twin stages)
+level <stage> <name> <floor height> <breakable floor>
+phase <stage> <level> <phase> <n> x z x z ...     outline per break state, counter-clockwise
+edge  <stage> <level> <phase> <index> <balcony|breakable>
+```
+
+At runtime each fighter's level is the highest floor at or below them; a level's phase is the first
+one that contains every position seen beyond its current outline this round (so a break is noticed the
+moment someone is past the old wall); a single-level stage where someone is far outside every outline
+counts as wall-less for the round (Devil's Pit at match point). New round = both fighters back at full
+health.
+
+**Wall awareness** (ini `wall_awareness`): the distance behind each fighter (a ray from them, away
+from the other) and whether two differently-facing walls are close (a corner) give the state: no walls
+/ calm / back to the wall (< 2.5 m) / cornered / opponent at the wall (< 3 m). Back to the wall: more
+guarding and movement, sidesteps toward the side with more room (a 1-frame up/down tap after neutral;
+which way "up" goes on each screen side is learned from the first clear sidestep). Cornered: guards
+more and tries a throw within 1.2 m. Opponent at the wall: more attacks, weighted toward heavy hitters
+(damage, launchers) that splat.
+
+## Stage ids
+
+0 Mishima Dojo, 1 Forgotten Realm, 2/53 Jungle Outpost, 3 Arctic Snowfall, 4/54 Twilight Conflict,
+5 Dragon's Nest, 6 Souq, 7 Devil's Pit, 8 Mishima Building, 9 Abandoned Temple, 30 Duomo di Sirio,
+31 Arena, 32/33 G Corp Helipad, 35 Brimstone and Fire, 36 Precipice of Fate, 37 Violet Systems,
+39 Kinder Gym, 40/55 Infinite Azure, 41 Geometric Plane, 51 Howard Estate, 52 Hammerhead,
+56 Last Day on Earth, 57 Cave of Enlightenment, 58 Vermillion Gates, 59 Island Paradise.

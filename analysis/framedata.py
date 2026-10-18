@@ -121,8 +121,9 @@ def write(table, path):
 if __name__ == "__main__":
     from load import load_dir
     from build_profiles import unique_recordings
-    rep_dir, out = sys.argv[1], sys.argv[2]
-    recs = unique_recordings(load_dir(rep_dir))
+    # framedata.py <recordings dir> [<more dirs> ...] <framedata.txt>
+    rep_dirs, out = sys.argv[1:-1], sys.argv[-1]
+    recs = unique_recordings([r for d in rep_dirs for r in load_dir(d)])
     table = build(recs)
     write(table, out)
     print(f"{len(table)} moves over {len({c for c, _ in table})} characters -> {out}")

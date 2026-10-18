@@ -113,11 +113,43 @@ def opponent_hash(rec):
     return slots_of(rec).get(OPPONENT_SLOT, (0, None))[1] if rec.probes else None
 
 
+_LIVE = {}  # live recordings dir -> {file name: "P1" | "P2" | "-" | "?"}
+
+
+def live_side(rec):
+    """Live (online) matches: which side the recording player was, from my_matches.txt next to the
+    files (the player's own tick-off list: P1, P2, '-' = spectated, '?' = unsure). None if not theirs."""
+    d = rec.path.parent
+    if d not in _LIVE:
+        _LIVE[d] = {}
+        f = d / "my_matches.txt"
+        if f.exists():
+            for line in f.read_text(encoding="utf-8").splitlines():
+                parts = line.split("#")[0].split()
+                if len(parts) < 2 or not parts[0].startswith("live_"):
+                    continue
+                if parts[-1].upper() in ("P1", "P2", "-", "?"):  # older list without label columns
+                    _LIVE[d][parts[0]] = (parts[-1].upper(), ".", ".")
+                elif len(parts) >= 4:
+                    _LIVE[d][parts[0]] = (parts[-3].upper(), parts[-2], parts[-1])
+    v = _LIVE[d].get(rec.path.name, ("?", ".", "."))[0]
+    return 0 if v == "P1" else 1 if v == "P2" else None
+
+
+def live_labels(rec):
+    """The player's own same-person tags for the left/right fighter of a live match ('.' = none)."""
+    live_side(rec)  # loads the list
+    _, a, b = _LIVE[rec.path.parent].get(rec.path.name, ("?", ".", "."))
+    return a, b
+
+
 def placeholder_hashes(recs):
     """Hashes that are the game's stand-in when the opponent's name is unavailable: one hash over
     many different opponent characters (one such hash covered 8 characters in 10 matches)."""
     chars = {}
     for r in recs:
+        if r.path.name.startswith("live_"):
+            continue
         h = opponent_hash(r)
         if h:
             chars.setdefault(h, set()).add(r.chars[1 - self_side(r)])
@@ -128,7 +160,20 @@ _PLACEHOLDERS = set()
 
 
 def player_ids(rec):
-    """('self', opponent hash) in slot order. Unknown or placeholder opponent hash -> None."""
+    """('self', opponent hash) in slot order. Unknown or placeholder opponent hash -> None.
+    Live matches: 'self' only on the side the player ticked; everyone else stays anonymous (live
+    name codes are not used to identify or group anyone)."""
+    if rec.path.name.startswith("live_"):
+        # sides the player tagged as the same person share an id (the tag only groups; profiles
+        # get numbered pseudonyms); untagged sides stay anonymous, one per match
+        ids = [None, None]
+        for i, lab in enumerate(live_labels(rec)):
+            if lab != ".":
+                ids[i] = f"label:{rec.path.parent}:{lab.lower()}"
+        me = live_side(rec)
+        if me is not None:
+            ids[me] = "self"
+        return tuple(ids)
     opp = opponent_hash(rec)
     if opp in _PLACEHOLDERS:
         opp = None
@@ -139,15 +184,16 @@ def player_ids(rec):
     return tuple(ids)
 
 
-def main(rep_dir, out_dir):
+def main(rep_dirs, out_dir):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     for old in out_dir.glob("*.t7p"):
         old.unlink()
     # group sides by (player hash, character); unknown players stay one profile per replay side
     groups = collections.OrderedDict()
-    recs = unique_recordings(load_dir(rep_dir))
-    recs.sort(key=lambda r: r.path.name)
+    recs = unique_recordings([r for d in rep_dirs for r in load_dir(d)])
+    # replays first, then live matches: keeps the replay players' pseudonym numbers stable
+    recs.sort(key=lambda r: (r.path.name.startswith("live_"), r.path.name))
     _PLACEHOLDERS.clear()
     _PLACEHOLDERS.update(placeholder_hashes(recs))
     print(f"{len(_PLACEHOLDERS)} placeholder name hash(es) treated as unknown opponents")
@@ -190,4 +236,5 @@ def main(rep_dir, out_dir):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    # build_profiles.py <recordings dir> [<more dirs, e.g. live data> ...] <profiles out dir>
+    main(sys.argv[1:-1], sys.argv[-1])
