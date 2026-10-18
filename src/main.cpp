@@ -22,6 +22,8 @@
 #include <fstream>
 #include <share.h>
 #include <tlhelp32.h>
+#include <psapi.h>
+#include <Xinput.h>
 #include <timeapi.h>
 #include <algorithm>
 #include <atomic>
@@ -37,7 +39,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 
 namespace {
 
-#define T7_VERSION_STR "0.6" // keep in step with the t7ghost.ini header (tools/write_ini.py)
+#define T7_VERSION_STR "0.6.3" // keep in step with the t7ghost.ini header (tools/write_ini.py)
 constexpr const char *kModVersion = T7_VERSION_STR;
 std::wstring g_dir; // .../Win64/t7ghost/
 FILE *g_log = nullptr;
@@ -449,6 +451,7 @@ uint32_t g_side[2] = {};
 // Reloaded by the worker (Ctrl+F9); the game thread only ever reads the published pointer.
 std::atomic<ghost::Brain *> g_brain = nullptr;
 std::atomic<bool> g_ai_active = false;
+std::atomic<int> g_ai_idx = -1; // side the AI drives while active (0 = P1, 1 = P2)
 
 ghost::Brain *load_brain()
 {
@@ -466,6 +469,15 @@ ghost::Brain *load_brain()
 	b->cfg.adapt = std::clamp(geti(L"ai", L"adapt", 70), 0, 100);
 	b->cfg.throw_break = std::clamp(geti(L"ai", L"throw_break_chance", 0), 0, 100);
 	b->cfg.wall_awareness = geti(L"ai", L"wall_awareness", 1) != 0;
+	b->cfg.arcade = geti(L"ai", L"arcade", 1) != 0;
+	b->cfg.treasure = geti(L"ai", L"treasure_battle", 1) != 0;
+	b->cfg.ghost_battle = geti(L"ghost_battle", L"enabled", 1) != 0;
+	b->cfg.gb_random_stage = geti(L"ghost_battle", L"random_stage", 1) != 0;
+	b->cfg.gb_ghost_opponents = geti(L"ghost_battle", L"ghost_opponents", 1) != 0;
+	b->cfg.gb_special_fights = geti(L"ghost_battle", L"special_fights", 1) != 0;
+	b->cfg.gb_default_costumes = geti(L"ghost_battle", L"default_costumes", 0) != 0;
+	b->cfg.gb_random_player = geti(L"ghost_battle", L"random_player", 0) != 0;
+	b->cfg.gb_end_menu = geti(L"ghost_battle", L"end_menu", 1) != 0;
 
 	// profiles/index.txt lists "<char> <name> <frames>" best-first; [profiles] c<char>=<name> overrides
 	const std::wstring dir = g_dir + L"profiles/";
@@ -512,6 +524,7 @@ ghost::Brain *load_brain()
 		}
 		if (prof.char_id < 0)
 			continue;
+		prof.merged = merged && use.size() > 1;
 		std::string extra;
 		for (const auto &n : prof.pool_names)
 			extra += " +" + n;
@@ -520,6 +533,7 @@ ghost::Brain *load_brain()
 			prof.throw_breaks, prof.throw_grabs, prof.throw_break_pct());
 		b->profiles.emplace(cid, std::move(prof));
 	}
+	b->profile_names = by_char;
 	// moves the AI has blocked before: frames it really had afterwards (learned live, kept across sessions)
 	{
 		std::ifstream lf(g_dir + L"learned_framedata.txt");
@@ -597,36 +611,82 @@ void ai_trace(ghost::Brain *b, uintptr_t p, uint32_t held, uint32_t pressed, int
 		fflush(g_trace);
 }
 
-bool ai_gate()
+// Which side the AI drives (0 = P1, 1 = P2, -1 = none). Offline only (game mode 2):
+//   Practice: the dummy (P2) when it is set to CPU at Ultra Hard;
+//   Arcade / Treasure Battle (if enabled): whichever side the game's CPU controls (+0x1570), either side;
+//   VS (two humans), online, replays, menus: never.
+const char *g_ai_mode = "";
+int ai_side(const ghost::Settings &cfg)
 {
-	return t7::read_global(t7::kGameMode) == t7::kModePractice && t7::read_global(t7::kDummyIsCpu) == 1 &&
-		t7::read_global(t7::kCpuLevel) == t7::kUltraHard;
+	if (t7::read_global(t7::kGameMode) != t7::kModePractice) // mode 2 = every offline battle
+		return -1;
+	const int bt = t7::read_global(t7::kBattleType);
+	if (bt == t7::kBattlePractice)
+	{
+		g_ai_mode = "Practice";
+		return t7::read_global(t7::kDummyIsCpu) == 1 && t7::read_global(t7::kCpuLevel) == t7::kUltraHard ? 1 : -1;
+	}
+	if ((bt == t7::kBattleArcade && cfg.arcade) || (bt == t7::kBattleTreasure && cfg.treasure))
+	{
+		g_ai_mode = bt == t7::kBattleArcade ? "Arcade" : "Treasure Battle";
+		const uintptr_t base = t7::exe_base();
+		int32_t c1 = 0, c2 = 0;
+		if (!t7::rd(base + t7::kLiveP1 + t7::kIsCpu, c1) || !t7::rd(base + t7::kLiveP2 + t7::kIsCpu, c2))
+			return -1;
+		if (c1 == 1 && c2 != 1)
+			return 0;
+		if (c2 == 1 && c1 != 1)
+			return 1;
+	}
+	return -1;
 }
+
+std::atomic<uint32_t> g_decode_calls[3] = {}; // recon: decode_input calls for P1 / P2 / other objects
+std::atomic<uint32_t> g_decode_input[2] = {};  // recon: frames with any held input, per side
 
 void __fastcall decode_hook(uintptr_t p, int side, uint32_t held, uint32_t pressed)
 {
 	const uintptr_t base = t7::exe_base();
 	const int idx = (p == base + t7::kLiveP2) ? 1 : (p == base + t7::kLiveP1) ? 0 : -1;
+	++g_decode_calls[idx < 0 ? 2 : idx];
+	if (idx >= 0 && held)
+		++g_decode_input[idx];
+	ghost::Brain *b = idx >= 0 ? g_brain.load() : nullptr;
+	const int ai = b ? ai_side(b->cfg) : -1;
+	if (idx >= 0 && ai < 0 && g_ai_active.exchange(false))
+	{
+		// left the mode (menus, VS, online...): hand the controls back
+		g_ai_idx = -1;
+		if (g_trace)
+		{
+			fclose(g_trace);
+			g_trace = nullptr;
+		}
+		logf("ai: off (left %s)", g_ai_mode);
+	}
 	if (idx == 1 && g_mirror && t7::read_global(t7::kGameMode) == t7::kModePractice)
 		held = g_raw[0][0], pressed = g_raw[0][1];
-	else if (idx == 1)
+	else if (idx >= 0 && idx == ai)
 	{
-		ghost::Brain *b = g_brain.load();
 		int32_t ch = -1;
 		t7::rd(p + 0xDC, ch);
-		const bool on = b && b->cfg.enabled && ai_gate() && b->has_profile(ch);
-		if (on != g_ai_active)
+		const bool on = b->cfg.enabled && b->has_profile(ch);
+		static int on_side = -1, on_char = -1;
+		// a new fight against another character (Arcade's next opponent) starts fresh as well
+		if (on != g_ai_active || (on && (idx != on_side || ch != on_char)))
 		{
-			if (b)
-				b->reset();
+			b->reset();
 			g_ai_active = on;
+			on_side = on ? idx : -1;
+			on_char = on ? ch : -1;
+			g_ai_idx = on_side;
 			if (!on && g_trace)
 			{
 				fclose(g_trace);
 				g_trace = nullptr;
 			}
-			logf("ai: %s (P2 char %d, profile %s)", on ? "ON" : "off", ch,
-				on && b->profiles.count(ch) ? b->profiles.at(ch).name.c_str() : "-");
+			logf("ai: %s (%s, P%d char %d, profile %s)", on ? "ON" : "off", g_ai_mode, idx + 1, ch,
+				on ? b->profile_label(ch).c_str() : "-");
 		}
 		static int last_side = -1;
 		if (on && side != last_side)
@@ -636,7 +696,9 @@ void __fastcall decode_hook(uintptr_t p, int side, uint32_t held, uint32_t press
 		}
 		uint32_t h, pr;
 		const uintptr_t blk = t7::newest_block();
-		if (on && b->step(p, base + t7::kLiveP1, blk ? blk + t7::kP2 : 0, blk, ch, h, pr))
+		const uintptr_t opp = base + (idx ? t7::kLiveP1 : t7::kLiveP2);
+		const uintptr_t ring_me = blk ? blk + (idx ? t7::kP2 : 0) : 0, ring_opp = blk ? blk + (idx ? 0 : t7::kP2) : 0;
+		if (on && b->step(p, opp, ring_me, ring_opp, ch, h, pr))
 		{
 			held = h, pressed = pr;
 			g_decode_orig(p, side, held, pressed);
@@ -659,6 +721,8 @@ decoded:
 	g_side[idx] = side;
 }
 
+#include "ghostbattle.hpp"
+#include "gbmenu.hpp"
 #include "overlay.hpp"
 
 bool install_hooks()
@@ -680,6 +744,8 @@ bool install_hooks()
 		return false;
 	}
 	logf("hook: decode_input hooked");
+	gb::install();
+	gbm::install();
 	return true;
 }
 
@@ -712,6 +778,111 @@ void write_status()
 // t7ghost/walls_survey.txt with the stage id, whenever someone moved >= 40 units, so normal
 // practice play (and walking along the walls on purpose) builds the per-stage wall maps.
 // Line: <stage> <player 0/1> <px> <py> <pz> <cls hint: simple_state> <stun>
+// ---------------------------------------------------------------- game-mode recon (Arcade / Treasure Battle)
+// Logs every game-mode change with the practice-CPU globals, stage and characters, and Ctrl+F5 dumps
+// both live player objects (and the .data globals near the known mode/CPU fields) to
+// t7ghost/dump_<time>_p1.bin / _p2.bin / _globals.bin, to find which side the CPU controls.
+void mode_tick()
+{
+	static int last = -12345;
+	static ULONGLONG next_report = 0;
+	const int mode = t7::read_global(t7::kGameMode);
+	if (GetTickCount64() >= next_report)
+	{
+		next_report = GetTickCount64() + 10000;
+		const uint32_t a = g_decode_calls[0].exchange(0), b = g_decode_calls[1].exchange(0), o = g_decode_calls[2].exchange(0);
+		const uint32_t ia = g_decode_input[0].exchange(0), ib = g_decode_input[1].exchange(0);
+		if (mode != 0 && (a || b))
+		{
+			// candidate "this side is the CPU" fields (Arcade/Treasure recon 2026-10-18: +0x1570 human 0 /
+			// cpu 1, +0x0008 human 257 / cpu 1, +0x0338 human 16 / cpu 0)
+			int32_t f[2][3] = {};
+			const uintptr_t base = t7::exe_base(), obj[2] = { base + t7::kLiveP1, base + t7::kLiveP2 };
+			for (int i = 0; i < 2; ++i)
+				t7::rd(obj[i] + 0x1570, f[i][0]), t7::rd(obj[i] + 0x8, f[i][1]), t7::rd(obj[i] + 0x338, f[i][2]);
+			logf("mode: %d - decode_input calls in 10 s: P1 %u (input on %u), P2 %u (input on %u), other %u | "
+				"cpu? +1570 %d/%d +0008 %d/%d +0338 %d/%d | dummy_is_cpu %d cpu_level %d", mode, a, ia, b, ib, o,
+				f[0][0], f[1][0], f[0][1], f[1][1], f[0][2], f[1][2], t7::read_global(t7::kDummyIsCpu), t7::read_global(t7::kCpuLevel));
+		}
+	}
+	if (mode == last)
+		return;
+	last = mode;
+	int32_t c1 = -1, c2 = -1;
+	t7::rd(t7::exe_base() + t7::kLiveP1 + 0xDC, c1);
+	t7::rd(t7::exe_base() + t7::kLiveP2 + 0xDC, c2);
+	logf("mode: game mode %d (dummy_is_cpu %d, cpu_level %d, stage %d, chars %d vs %d)", mode,
+		t7::read_global(t7::kDummyIsCpu), t7::read_global(t7::kCpuLevel), t7::read_global(t7::kStageId), c1, c2);
+}
+
+// Ghost Battle recon (Ctrl+F4): find the menu text "TREASURE BATTLE" in the game's memory (UTF-16 and
+// ASCII, any case variant listed) for the later runtime rename. Logs where it lives (module-relative or
+// heap) and how often; never logs other memory contents.
+void find_menu_text()
+{
+	static const wchar_t *words[] = { L"TREASURE BATTLE", L"Treasure Battle", L"TREASURE" };
+	const HMODULE exe = GetModuleHandleW(nullptr);
+	MODULEINFO mi{};
+	K32GetModuleInformation(GetCurrentProcess(), exe, &mi, sizeof mi);
+	const uintptr_t m0 = uintptr_t(mi.lpBaseOfDll), m1 = m0 + mi.SizeOfImage;
+	int total[3] = {}, logged = 0;
+	uintptr_t a = 0x10000;
+	MEMORY_BASIC_INFORMATION mb;
+	std::vector<uint8_t> buf;
+	while (VirtualQuery(reinterpret_cast<void *>(a), &mb, sizeof mb) == sizeof mb)
+	{
+		const uintptr_t start = uintptr_t(mb.BaseAddress), size = mb.RegionSize;
+		a = start + size;
+		if (mb.State != MEM_COMMIT || (mb.Protect & (PAGE_GUARD | PAGE_NOACCESS)) || size > (512u << 20) ||
+			!(mb.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)))
+			continue;
+		buf.resize(size);
+		if (!t7::safe_copy(buf.data(), start, size))
+			continue;
+		for (int w = 0; w < 3; ++w)
+		{
+			const size_t n = wcslen(words[w]) * 2;
+			const uint8_t *pat = reinterpret_cast<const uint8_t *>(words[w]);
+			for (size_t i = 0; i + n <= size; i += 2)
+				if (buf[i] == pat[0] && std::memcmp(&buf[i], pat, n) == 0)
+				{
+					++total[w];
+					if (logged < 40)
+					{
+						const uintptr_t at = start + i;
+						if (at >= m0 && at < m1)
+							logf("text: \"%ls\" at exe+0x%llX", words[w], (unsigned long long)(at - m0));
+						else
+							logf("text: \"%ls\" at heap %p (region %p, %zu KB)", words[w], (void *)at, (void *)start, size / 1024);
+						++logged;
+					}
+				}
+		}
+	}
+	logf("text: found %d x \"TREASURE BATTLE\", %d x \"Treasure Battle\", %d x \"TREASURE\" (UTF-16)", total[0], total[1], total[2]);
+}
+
+void dump_players()
+{
+	const uintptr_t base = t7::exe_base();
+	const std::wstring stem = stamp_name(L"dump_", L"");
+	auto dump = [&](const wchar_t *suffix, uintptr_t addr, size_t n) {
+		std::vector<uint8_t> buf(n);
+		if (!t7::safe_copy(buf.data(), addr, n))
+			return false;
+		FILE *f = _wfsopen((stem + suffix).c_str(), L"wb", _SH_DENYWR);
+		if (!f)
+			return false;
+		fwrite(buf.data(), 1, n, f);
+		fclose(f);
+		return true;
+	};
+	const bool a = dump(L"_p1.bin", base + t7::kLiveP1, 0x3670), b = dump(L"_p2.bin", base + t7::kLiveP2, 0x3670);
+	const bool g = dump(L"_globals.bin", base + 0x3447000, 0x2000); // around the practice CPU globals
+	logf("dump: players %s/%s, globals %s (mode %d, stage %d)", a ? "ok" : "FAIL", b ? "ok" : "FAIL", g ? "ok" : "FAIL",
+		t7::read_global(t7::kGameMode), t7::read_global(t7::kStageId));
+}
+
 void survey_tick()
 {
 	static FILE *f = nullptr;
@@ -773,6 +944,9 @@ DWORD WINAPI worker(void *)
 	for (;;)
 	{
 		if (hotkey(VK_F6)) g_rec.toggle();
+		if (hotkey(VK_F5)) dump_players();
+		if (hotkey(VK_F4)) find_menu_text();
+		mode_tick();
 		if (hotkey(VK_F7)) g_tracer.toggle();
 		if (hotkey(VK_F8)) g_tracer.mark();
 		g_tracer.tick();

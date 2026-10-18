@@ -197,13 +197,14 @@ void overlay_panel()
 		g_menu_open = false;
 
 	// status
-	int32_t p2 = -1;
-	t7::rd(t7::exe_base() + t7::kLiveP2 + 0xDC, p2);
-	const auto pit = b->profiles.find(p2);
-	if (g_ai_active && pit != b->profiles.end())
-		ImGui::TextColored(ImVec4(0.45f, 0.9f, 0.45f, 1), "AI ACTIVE - playing as %s", pit->second.name.c_str());
+	const int ai_idx = g_ai_idx;
+	int32_t aic = -1;
+	if (ai_idx >= 0)
+		t7::rd(t7::exe_base() + (ai_idx ? t7::kLiveP2 : t7::kLiveP1) + 0xDC, aic);
+	if (g_ai_active && b->has_profile(aic))
+		ImGui::TextColored(ImVec4(0.45f, 0.9f, 0.45f, 1), "AI ACTIVE (%s) - playing as %s", g_ai_mode, b->profile_label(aic).c_str());
 	else
-		ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1), "AI waiting: Practice, opponent = CPU on ULTRA HARD,\nopponent character with a profile");
+		ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1), "AI waiting: Practice (opponent = CPU on ULTRA HARD), Arcade or\nTreasure Battle, against a character with a profile");
 	ImGui::Separator();
 	ImGui::Spacing();
 
@@ -211,7 +212,14 @@ void overlay_panel()
 	bool en = c.enabled;
 	if (ImGui::Checkbox("AI enabled", &en))
 		c.enabled = en, save_int(L"mod_enabled", en);
-	ImGui::TextDisabled("replaces the Practice CPU at Ultra Hard (only there, never online)");
+	ImGui::TextDisabled("replaces the CPU offline (never online): Practice at Ultra Hard, and");
+	bool ar = c.arcade, tr = c.treasure;
+	if (ImGui::Checkbox("Arcade Battle", &ar))
+		c.arcade = ar, save_int(L"arcade", ar);
+	ImGui::SameLine(200 * sc);
+	if (ImGui::Checkbox("Treasure Battle", &tr))
+		c.treasure = tr, save_int(L"treasure_battle", tr);
+	ImGui::TextDisabled("characters without a profile keep the game's own CPU");
 	ImGui::Spacing();
 
 	int v = c.reaction_frames;
@@ -267,6 +275,40 @@ void overlay_panel()
 		}
 		else
 			ImGui::TextDisabled("sidesteps away from walls, defends corners, presses you into walls");
+	}
+	ImGui::Spacing();
+
+	// Ghost Battle Mode (Treasure Battle reworked)
+	ImGui::SeparatorText("Ghost Battle Mode");
+	{
+		auto save_gb = [](const wchar_t *key, int v) { ini_set(L"ghost_battle", key, std::to_wstring(v)); };
+		bool g = c.ghost_battle, rs = c.gb_random_stage, go = c.gb_ghost_opponents, sf = c.gb_special_fights, dc = c.gb_default_costumes;
+		bool rp = c.gb_random_player, em = c.gb_end_menu;
+		if (ImGui::Checkbox("Enable Ghost Battle Mode", &g))
+			c.ghost_battle = g, save_gb(L"enabled", g);
+		ImGui::TextDisabled("Treasure Battle with the round count from your Game Options");
+		ImGui::BeginDisabled(!c.ghost_battle);
+		if (ImGui::Checkbox("Random stage", &rs))
+			c.gb_random_stage = rs, save_gb(L"random_stage", rs);
+		ImGui::SameLine(200 * sc);
+		if (ImGui::Checkbox("Ghost opponents", &go))
+			c.gb_ghost_opponents = go, save_gb(L"ghost_opponents", go);
+		ImGui::TextDisabled("a new stage every fight; opponents only from characters with a Ghost profile");
+		if (ImGui::Checkbox("Special fights", &sf))
+			c.gb_special_fights = sf, save_gb(L"special_fights", sf);
+		ImGui::SameLine(200 * sc);
+		if (ImGui::Checkbox("Force default costumes", &dc))
+			c.gb_default_costumes = dc, save_gb(L"default_costumes", dc);
+		ImGui::EndDisabled();
+		ImGui::TextDisabled("Turbo and other special fights; default outfits instead of the ghosts' own");
+		if (ImGui::Checkbox("End-of-match menu", &em))
+			c.gb_end_menu = em, save_gb(L"end_menu", em);
+		ImGui::TextDisabled("rematch, new stage, choose the next opponent, character select, main menu");
+		if (ImGui::Checkbox("Random player per ghost", &rp))
+			c.gb_random_player = rp, save_gb(L"random_player", rp);
+		ImGui::TextDisabled("each ghost imitates one random recorded player (off = merged, or your choice below)");
+		if (gb::g_status[0])
+			ImGui::TextDisabled("%s", gb::g_status);
 	}
 	ImGui::Spacing();
 
@@ -337,7 +379,8 @@ void overlay_frame(IDXGISwapChain *sc)
 		g_ov.init = true;
 	}
 	const bool hint = GetTickCount64() < g_ov.hint_until;
-	if (!g_menu_open && !hint)
+	const bool end_menu = gbm::tick(); // Ghost Battle end-of-match menu
+	if (!g_menu_open && !hint && !end_menu)
 		return;
 	if (!g_ov.rtv)
 	{
@@ -353,9 +396,11 @@ void overlay_frame(IDXGISwapChain *sc)
 	ImGui_ImplDX11_NewFrame();
 	ImGui_ImplWin32_NewFrame();
 	ImGui::NewFrame();
+	if (end_menu)
+		gbm::draw();
 	if (g_menu_open)
 		overlay_panel();
-	else
+	else if (!end_menu)
 	{
 		const float s = std::clamp(ImGui::GetIO().DisplaySize.y / 800.0f, 1.0f, 3.0f);
 		ImGui::GetStyle().FontScaleMain = s;

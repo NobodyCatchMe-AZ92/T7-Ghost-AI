@@ -22,6 +22,20 @@ your actual inputs rather than react to what it sees.
 
 Video demonstration of Katarina's Ghost AI (work in progress): https://streamable.com/447xkg
 
+### What's new in v0.6.3
+- **Ghost AI in Arcade Battle and Treasure Battle**, not just Practice - on either side of the screen.
+  Characters without a Ghost profile keep the game's own CPU. Both can be switched off in the F1 menu.
+- **Ghost Battle Mode** - Treasure Battle reworked into a Ghost gauntlet:
+  - the round count follows your Game Options (Treasure Battle normally forces first to 2);
+  - a random stage every fight (instead of the same stage for five fights);
+  - opponents are only characters with a Ghost profile - taken from the game's own ranked ghosts (any
+    rank), so they keep their names and **custom outfits**; or tick *Force default costumes*;
+  - *Special fights* (Turbo and the like) can be switched off;
+  - *Random player per ghost*: each Ghost imitates one recorded player instead of the merged profile.
+- **End-of-match menu** in Ghost Battle Mode, driven by your controller: *Rematch*, *Rematch on a new
+  stage*, a choice of **three next opponents**, *Return to Character Select* and *Return to Main Menu*.
+- Treasure Battle's own rewards and progress are left untouched.
+
 ### What's new in v0.6
 - **Wall awareness.** Every stage in the game is mapped - all floors, balconies, breakable walls and
   breakable floors. With its back to a wall the Ghost sidesteps away (guarding in between); backed into
@@ -100,8 +114,8 @@ Thank you!
 2. **Profiles.** The Python pipeline in `analysis/` cuts each player's play into decisions - what they
    did in which situation, at which distance and frame advantage, with how much life and rage - and
    learns every move's frame data (speed, damage, reach, block and hit advantage) from the recordings.
-3. **Playing.** In Practice, with the opponent set to CPU on Ultra Hard, the mod takes over the
-   opponent's controller. Each frame it sees the fight through a short reaction delay and picks the
+3. **Playing.** In Practice (opponent set to CPU on Ultra Hard), Arcade Battle and Treasure / Ghost
+   Battle, the mod takes over the CPU's controller. Each frame it sees the fight through a short reaction delay and picks the
    recorded players' own choice for the situation - and on top: buffered punishes from learned frame
    data, whiff punishes (dashing in when needed), juggles with the players' own combos, hit-confirms,
    throw breaks, and what it has learned about you.
@@ -119,6 +133,7 @@ See [docs/TECHNICAL.md](docs/TECHNICAL.md) for the memory layout, file formats, 
 | `src/brain.hpp`, `src/adapt.hpp` | the AI: profile playback, punishing, guarding, live adaptation, wall behaviour |
 | `src/walls.hpp` | wall maps: floors, wall breaks and live wall distances |
 | `src/overlay.hpp` | in-game settings panel (Dear ImGui on the game's D3D11 swap chain) |
+| `src/ghostbattle.hpp`, `src/gbmenu.hpp` | Ghost Battle Mode (Treasure Battle hooks) and its end-of-match menu |
 | `src/harvest.cpp` | the shareable read-only harvesters (replay / live) |
 | `src/t7.hpp`, `src/names.hpp` | Tekken 7 memory layout; player-name pseudonymisation |
 | `analysis/` | Python: load recordings (replay and live), build profiles, frame data and wall maps |

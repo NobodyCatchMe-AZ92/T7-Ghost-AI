@@ -88,6 +88,34 @@ Hooks `IDXGISwapChain::Present` / `ResizeBuffers` (found through a throwaway D3D
 draws Dear ImGui over the game's back buffer while open, and subclasses the window procedure for
 input. Changes go to the running AI and to `t7ghost.ini` (WritePrivateProfileString).
 
+## Which fights the AI plays
+
+Offline only (game mode 2). Battle type `[exe+0x34D67B0]`: 0 Arcade, 1 Treasure, 2 VS, 3 Practice.
+Practice: the dummy when it is set to CPU at Ultra Hard. Arcade / Treasure (ini `arcade`,
+`treasure_battle`): whichever side the game controls (player object `+0x1570` = 1 for the CPU / dummy,
+0 for a human). A new opponent character starts a fresh AI state.
+
+## Ghost Battle Mode (`src/ghostbattle.hpp`, `src/gbmenu.hpp`)
+
+Treasure Battle sets up every next fight in `exe+0x439340`. It fills the battle settings object
+(vcall `+0x10` on `[exe+0x34CE030]+0x460`, then `+0x10`): `+0x0C/+0x10` character per side, `+0x14`
+stage, `+0xA0` rounds to win (always 2 in Treasure), `+0xB8 + side*0x460` costume (mode 0 = default,
+4 = the ranked ghost's own). The fight type picks the opponent: 0/4/5/6 = a ranked ghost from the
+online-style list `[exe+0x34CEA10]` (8 rank tiers, 0x40-byte records: `+8` character, `+0x10` name),
+applied by `exe+0x439C90`; 5 is Turbo; other types are special fights. The mod hooks both functions:
+it hands `0x439C90` a ghost whose character has a profile (character first, uniformly, then any rank),
+and after `0x439340` sets the rounds from Game Options (`[[exe+0x34CE450]+0xA1E0]`, what VS reads), a
+random stage, and optionally default costumes. Special fights off: the fight type is set to 0 before
+the call. The ghost list is rebuilt between fights, so a chosen ghost is remembered by character and
+name and looked up again at setup.
+
+End-of-match menu: the game's own two-option menu (Next match / Start Over, Return to Main Menu) is up
+while `[exe+0x34D6C04]` is non-zero; `[exe+0x379B16C]` is 3 after the KO and while paused, 2 in a fight.
+The mod draws its menu over it and hooks `XInputGetState` (xinput1_3, imported by the game): neutral
+pads while the menu is open, then scripted presses on the native menu (A = continue, Down + A = main
+menu; it opens on the top entry and wraps). Character Select: continue, press Start until the next fight
+is paused (not possible during the intros), then Up, Up (= Character Select), A, Left (= Yes), A.
+
 ## Harvesters (`src/harvest.cpp`)
 
 The recorder alone, with no hooks: replay variant (records while game mode = 3, optional

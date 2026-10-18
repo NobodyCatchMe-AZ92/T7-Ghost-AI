@@ -6,8 +6,11 @@
 #include "walls.hpp"
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <fstream>
+#include <map>
+#include <memory>
 #include <random>
 #include <sstream>
 #include <string>
@@ -91,6 +94,7 @@ struct Profile
 	// compete for punishes and combos (see Brain::sample / best_punisher)
 	std::vector<Chunk> pool;
 	std::vector<std::string> pool_names;
+	bool merged = false; // all players as one (pool_names = the players absorbed into name's)
 };
 
 // Add `other`'s chunks to `p`: into the pool (hybrid) or as p's own chunks (merged). Hit-confirm
@@ -254,6 +258,15 @@ struct Settings
 	int adapt = 70;             // 0-100: how strongly the AI adapts to the human's habits learned in play
 	int throw_break = 0;        // 0 = the player's own break rate (profile), 1 = never, 2-100 = % chance
 	bool wall_awareness = true; // walls change how it plays (stage maps in walls.txt)
+	bool arcade = true;         // also replace the CPU in Arcade Battle
+	bool treasure = true;       // also replace the CPU in Treasure Battle
+	bool ghost_battle = true;   // Ghost Battle Mode: Treasure Battle with Game Options rounds (ghostbattle.hpp)
+	bool gb_random_stage = true;    //   a random stage every fight
+	bool gb_ghost_opponents = true; //   opponents with a Ghost profile
+	bool gb_special_fights = true;  //   keep Treasure's special fights (Turbo etc.); off = every fight regular
+	bool gb_default_costumes = false; // force default costumes (off = the ranked ghosts' own outfits)
+	bool gb_random_player = false;  //   each ghost imitates one random recorded player (off = usual profile)
+	bool gb_end_menu = true;        //   end-of-match menu: rematch / new stage / next opponent x3 / ... (gbmenu.hpp)
 };
 
 class Brain
@@ -290,17 +303,52 @@ public:
 		string_guard_ = false;
 		last_seen_atk_type_ = 0;
 		rage_seen_[0] = rage_seen_[1] = -1000;
+		// everything stamped with the old frame counter (frame_ restarts at 0): a stale stamp from the
+		// previous fight looked like the future and blocked e.g. wall sidesteps until the counter caught up
+		punish_chunk_ = nullptr, punish_buffered_ = false, blocked_pending_ = false, measuring_ = false;
+		known_window_ = 0, confirm_move_ = 0, confirm_started_ = false, confirm_wait_ = 0;
+		expect_chunk_ = nullptr, expect_frames_ = 0;
+		step_key_ = 0, interrupt_key_ = 0, breaking_ = false, grab_watch_ = false, sl_.on = false;
+		read_move_ = -1, age_move_ = -1, guard_roll_move_ = -1;
+		last_wall_move_ = -1000, ws_pending_ = ws_logged_ = -1;
+		prev_my_cls_ = prev_opp_cls_ = Cls::free, my_free_since_ = opp_free_since_ = 0, adv_ = 0;
+		model_ = nullptr, model_char_ = -1, win_open_ = false, human_down_ = false, last_human_move_ = -1;
 	}
 
 	bool has_profile(int char_id) const { return profiles.count(char_id) != 0; }
 
+	// Ghost Battle "random player" (ghostbattle.hpp): one recorded player for the current Treasure fight;
+	// otherwise the character's usual profile ([profiles], merged by default)
+	std::map<int, std::vector<std::string>> profile_names; // recorded players per character, best first
+	std::atomic<std::shared_ptr<const Profile>> solo;      // set per fight on the game thread, read by the F1 panel
+	const Profile *active_profile(int ch) const
+	{
+		if (const auto s = solo.load(); s && s->char_id == ch && t7::read_global(t7::kBattleType) == t7::kBattleTreasure)
+			return s.get(); // stays alive in `solo` until the next fight is set up (same thread)
+		const auto it = profiles.find(ch);
+		return it == profiles.end() ? nullptr : &it->second;
+	}
+	std::string profile_label(int ch) const
+	{
+		const auto s = solo.load();
+		if (s && s->char_id == ch && t7::read_global(t7::kBattleType) == t7::kBattleTreasure)
+			return s->name + " (one player)";
+		const auto it = profiles.find(ch);
+		if (it == profiles.end())
+			return "-";
+		const Profile &p = it->second;
+		if (p.merged)
+			return p.name.substr(0, p.name.rfind("-P")) + " (merged, " + std::to_string(1 + p.pool_names.size()) + (p.pool_names.empty() ? " player)" : " players)");
+		return p.pool_names.empty() ? p.name : p.name + " (hybrid)";
+	}
+
 	// Called once per frame for P2. Returns true and fills held/pressed when the brain drives P2.
 	bool step(uintptr_t me_obj, uintptr_t opp_obj, uintptr_t me_ring, uintptr_t opp_ring, int my_char, uint32_t &held, uint32_t &pressed)
 	{
-		auto it = profiles.find(my_char);
-		if (it == profiles.end())
+		const Profile *pp = active_profile(my_char);
+		if (!pp)
 			return false;
-		const Profile &prof = it->second;
+		const Profile &prof = *pp;
 		const Snap me = snap(me_obj, me_ring);
 		Snap opp = snap(opp_obj, opp_ring);
 		if (!me.valid || !opp.valid)

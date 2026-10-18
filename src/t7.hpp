@@ -22,7 +22,12 @@ constexpr uintptr_t kGameMode = 0x34D67A8;   // 0 = menus, 2 = practice, 3 = rep
 constexpr uintptr_t kDummyIsCpu = 0x3447820; // practice dummy set to CPU (0/1)
 constexpr uintptr_t kCpuLevel = 0x3447834;   // practice CPU difficulty 0..4 (4 = Ultra Hard)
 constexpr uintptr_t kStageId = 0x34DF550;    // stage of the loaded fight (twin 0x34E9800): 3 Arctic Snowfall, 40 Infinite Azure
-constexpr int kModeMenu = 0, kModePractice = 2, kModeReplay = 3, kUltraHard = 4;
+constexpr int kModeMenu = 0, kModeOnline = 1, kModePractice = 2, kModeReplay = 3, kUltraHard = 4;
+// offline battle type, next to the game mode (tracer 2026-10-18): 0 Arcade, 1 Treasure Battle, 2 VS, 3 Practice
+constexpr uintptr_t kBattleType = 0x34D67B0;
+constexpr int kBattleArcade = 0, kBattleTreasure = 1, kBattleVs = 2, kBattlePractice = 3;
+// per player: 1 = controlled by the game (CPU / Practice dummy), 0 = a human (recon 2026-10-18)
+constexpr uintptr_t kIsCpu = 0x1570;
 
 // static live player objects (exe-relative); field offsets match the ring snapshot layout
 constexpr uintptr_t kLiveP1 = 0x34EA7D0, kLiveP2 = 0x34EDE40;
