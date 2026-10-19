@@ -205,6 +205,35 @@ inline int load_punishes(const std::wstring &path, Routes &out)
 	return n;
 }
 
+// Taunts the author demonstrated after a KO (analysis/taunts.py -> combos/taunts_<char>.txt): "char <id>",
+// then one taunt per line: frames | held:frames,...
+using Taunts = std::unordered_map<int, std::vector<std::vector<uint32_t>>>;
+inline int load_taunts(const std::wstring &path, Taunts &out)
+{
+	std::ifstream in(path);
+	std::string line;
+	int ch = -1, n = 0;
+	while (std::getline(in, line))
+	{
+		if (line.rfind("char ", 0) == 0)
+		{
+			ch = std::atoi(line.c_str() + 5);
+			continue;
+		}
+		const size_t bar = line.find('|');
+		if (ch < 0 || line.empty() || line[0] == '#' || bar == std::string::npos)
+			continue;
+		std::vector<uint32_t> ins;
+		std::istringstream ss(line.substr(bar + 1, line.find('#') - bar - 1));
+		for (std::string t; std::getline(ss, t, ',');)
+			if (const size_t c = t.find(':'); c != std::string::npos)
+				ins.insert(ins.end(), std::atoi(t.c_str() + c + 1), uint32_t(std::stoul(t.substr(0, c))));
+		if (!ins.empty())
+			out[ch].push_back(std::move(ins)), ++n;
+	}
+	return n;
+}
+
 struct Profile
 {
 	int char_id = -1;
@@ -382,6 +411,7 @@ inline int remaining(const Snap &s) { return std::max(0, s.recovery - s.move_tim
 struct Settings
 {
 	bool enabled = true;
+	int ai_preset = 3;          // Ghost AI Preset: 0 = Custom Settings (the ini's own values), 1-4 = kAiPresets (default Challenging)
 	int reaction_frames = 14;   // perception delay for the opponent's actions
 	int input_read_chance = 0;  // % per opponent move: perceived instantly instead of after the delay
 	bool punish = true;         // always punish when a punisher from the profile fits the window
@@ -393,6 +423,7 @@ struct Settings
 	// splat) - then the player's own habits take over; 2 = the routes, always played to the end.
 	// Launchers without a route always use the player's own habits.
 	int combo_style = 1;
+	bool taunts = true;         // taunt after KO'ing the player (15%, 75% with >= 75% health left)
 	int guard_skill = 100;      // % of perceived attacks guarded correctly (rest: player's own habits)
 	int decision_skill = 60;    // 0-100: favour the player's attacks that landed over ones that whiffed/got hit
 	int adapt = 70;             // 0-100: how strongly the AI adapts to the human's habits learned in play
@@ -404,13 +435,43 @@ struct Settings
 	bool gb_random_stage = true;    //   a random stage every fight
 	bool gb_ghost_opponents = true; //   opponents with a Ghost profile
 	bool gb_special_fights = false; //   keep Treasure's special fights (Turbo etc.); off = every fight regular
-	bool gb_default_costumes = false; // force default costumes (off = the ranked ghosts' own outfits)
+	int gb_costume_test = 0;        // dev: option 2 - 0 normal, 2 presets only (hangs), 3 force Default 3/4
+	int gb_costumes = 0;            // 0 = the ranked ghosts' own (customized) outfits, 1 = 1P costumes only,
+	                                //   2 = a random default preset costume (Preset 1-8) per opponent
 	bool gb_random_player = false;  //   each ghost imitates one random recorded player (off = usual profile)
 	bool gb_end_menu = true;        //   end-of-match menu: rematch / new stage / next opponent x3 / ... (gbmenu.hpp)
 	bool gb_native_menu = true;     //   ...drawn in the game's own result window (off = the overlay)
 	bool gb_rename = true;          //   "TREASURE BATTLE" -> "GHOST BATTLE" in the menus (gbtext.hpp)
 	bool gb_hide_chests = true;     //   no treasure chest icons on the match HUD (results screen keeps them)
+	// Game Modifiers (2026-10-19; offline battles only, each takes effect from the next match - mods_tick)
+	bool mod_no_rage = false;       //   nobody gets rage
 };
+
+// Ghost AI presets (F1 "Ghost AI Preset", 2026-10-19). While one is chosen the Ghost AI sliders are
+// locked to it; the ini keeps the custom values for "Custom Settings".
+struct AiValues { int reaction, read, guard, decision, adapt, throw_break, punish, combo; bool walls; };
+inline constexpr const char *kAiPresetNames[] = { "Custom Settings", "Fair", "Medium Challenge", "Challenging", "Unfair" };
+inline constexpr AiValues kAiPresets[] = {
+	{},
+	// Fair: the recorded players as they were - human reaction time, no input reading, the players' own
+	// guarding, punishing, throw breaks and combos, little steering by statistics or adaptation
+	{ 15, 0, 50, 30, 30, 0, 0, 0, true },
+	// Medium Challenge: halfway to Challenging
+	{ 12, 30, 80, 50, 50, 25, 40, 1, true },
+	// Challenging: the author's own configuration
+	{ 10, 70, 100, 70, 70, 50, 75, 1, true },
+	// Unfair: everything at the top - very fast reactions, reads every move, perfect guards, punishes
+	// and throw breaks, full adaptation
+	{ 6, 100, 100, 100, 100, 100, 100, 1, true },
+};
+inline void apply_ai_preset(Settings &c, int p)
+{
+	if (p <= 0 || p >= int(std::size(kAiPresets)))
+		return;
+	const AiValues &v = kAiPresets[p];
+	c.reaction_frames = v.reaction, c.input_read_chance = v.read, c.guard_skill = v.guard, c.decision_skill = v.decision;
+	c.adapt = v.adapt, c.throw_break = v.throw_break, c.punish_skill = v.punish, c.combo_style = v.combo, c.wall_awareness = v.walls;
+}
 
 class Brain
 {
@@ -421,6 +482,7 @@ public:
 	walls::Map wallmap;                        // per-stage wall maps (walls.txt)
 	Routes routes;                             // the author's combo routes (combos/routes_<char>.txt)
 	Routes punishes;                           // the author's punishes (combos/punishes_<char>.txt)
+	Taunts taunts;                             // the author's taunts after a KO (combos/taunts_<char>.txt)
 	// wall awareness status (shown in the settings panel)
 	enum WallState { kWsOff, kWsNoWalls, kWsCalm, kWsBack, kWsCornered, kWsPress };
 	struct WallInfo { int state = kWsOff; float my_back = -1, opp_back = -1; int my_type = 0, opp_type = 0; const char *level = ""; } wall_info;
@@ -629,6 +691,7 @@ public:
 		if (me.move_id != my_move_)
 			my_move_ = me.move_id, my_move_t0_ = frame_;
 		my_age_ = int(frame_ - my_move_t0_);
+		taunt_tick(me, opp);
 		route_tick(me, opp);
 
 		const int sit = situation(me, seen);
@@ -683,7 +746,11 @@ public:
 				pdiag_.low ? "low" : "standing", pdiag_.dist, pdiag_.why);
 			last_event = pdiag_note_, dbg.decided = true;
 		}
-		if (blocking && my_rem <= 1 && !punish_buffered_ && cfg.punish && blocked_pending_)
+		// the next hit of their string is already on its way (Julia's df+3,1+2: the slow 1+2 starts in our
+		// blockstun): no punish, no "string over" - keep guarding. A follow-up delayed past our blockstun
+		// can still be punished in the gap, like in the real game.
+		const bool next_hit = cls(opp) == Cls::attack && opp.move_timer <= active_end(opp);
+		if (blocking && my_rem <= 1 && !punish_buffered_ && cfg.punish && blocked_pending_ && !next_hit)
 		{
 			bool known = true;
 			int w = punish_window(blocked_key_, opp, my_rem, &known);
@@ -707,7 +774,7 @@ public:
 		{
 			blocked_pending_ = false;
 			const int w = punish_window(blocked_key_, opp, 0);
-			if (w >= 10)
+			if (w >= 10 && !next_hit)
 				known_window_ = w;
 			if (!punish_buffered_) // measure how long they really stay recovering (learning)
 				meas_key_ = blocked_key_, meas_t0_ = frame_, measuring_ = true;
@@ -732,9 +799,9 @@ public:
 				(oc == Cls::attack && opp.move_timer <= 2 && frame_ - meas_t0_ > 0))
 				measuring_ = false; // we hit them, or they started something new: no clean reading
 		}
-		if (known_window_ > 0)
+		if (known_window_ > 0 && !next_hit)
 			string_guard_ = false; // the string is over: their move was blocked and they are recovering
-		else if (string_guard_ && (mc != Cls::free || !(cls(opp) == Cls::attack && opp.move_timer <= opp.startup + 2)))
+		else if (string_guard_ && (mc != Cls::free || !next_hit))
 			string_guard_ = false;
 		const bool guarding_string = mc == Cls::stun || string_guard_;
 
@@ -917,7 +984,9 @@ private:
 	// go on into the rest of the string only as often as this player did after that result.
 	void confirm_tick(const Profile &p, const Snap &me, const Snap &opp)
 	{
-		if (!confirm_move_ || playing_.empty())
+		// a recorded combo route or punish took over (Hwoarang's b+3 launch: the string confirm then stopped
+		// the route one frame after it began - the combo never came out): it plays to its own end
+		if (!confirm_move_ || playing_.empty() || playing_kind_ == kRoute || playing_kind_ == kPunish)
 		{
 			confirm_move_ = 0;
 			return;
@@ -1393,6 +1462,27 @@ private:
 		return true;
 	}
 
+	// ---- taunts (2026-10-19): when we KO them, 15% of the time (75% with >= 75% of our health left) we
+	// play one of the author's taunts for our character - in the seconds the winner keeps control
+	static constexpr int kTaunt = 6;
+	int32_t taunt_prev_hp_ = 100;
+	void taunt_tick(const Snap &me, const Snap &opp)
+	{
+		const bool ko = opp.hp <= 0 && taunt_prev_hp_ > 0 && me.hp > 0;
+		taunt_prev_hp_ = opp.hp;
+		if (!ko || !cfg.taunts)
+			return;
+		const auto it = taunts.find(me.char_id);
+		if (it == taunts.end() || it->second.empty())
+			return;
+		const int chance = me.hp >= 75 ? 75 : 15;
+		if (int(rng_() % 100) >= chance)
+			return;
+		const auto &t = it->second[rng_() % it->second.size()];
+		play(t, false, "taunt", kTaunt);
+		route_ = nullptr;
+	}
+
 	// ---- combo routes
 	static constexpr int kRoute = 4;           // playing_kind_ of a route (not a profile chunk kind)
 	static constexpr int kHitSlack = 10;       // a route's hit may land this many frames off its recording
@@ -1446,7 +1536,8 @@ private:
 		}
 		// a route starts when our move is its launcher, up to 20 frames into the juggle: a two-part launcher
 		// (Jin's d+3+4 = 1695 then 1697) can lift them while its first part is still out
-		if (cfg.combo_style == 0 || oc != Cls::juggled || frame_ - launch_frame_ > 20 || me.move_id == route_tried_)
+		if (cfg.combo_style == 0 || oc != Cls::juggled || frame_ - launch_frame_ > 20 || me.move_id == route_tried_ ||
+			(playing_kind_ == kTaunt && !playing_.empty()))
 			return;
 		route_tried_ = me.move_id;
 		const auto it = routes.find(me.char_id);

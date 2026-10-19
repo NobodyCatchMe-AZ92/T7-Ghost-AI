@@ -204,11 +204,13 @@ void overlay_panel()
 	const float sc = std::clamp(ImGui::GetIO().DisplaySize.y / 800.0f, 1.0f, 3.0f);
 	ImGui::GetStyle().FontScaleMain = sc;
 	ImGui::SetNextWindowPos(ImVec2(30 * sc, 30 * sc), ImGuiCond_FirstUseEver);
-	ImGui::SetNextWindowSize(ImVec2(560 * sc, 0), ImGuiCond_FirstUseEver);
+	// fits its content (the categories open and close), never taller than the screen
+	const float max_h = std::max(200.0f, ImGui::GetIO().DisplaySize.y - 60 * sc);
+	ImGui::SetNextWindowSizeConstraints(ImVec2(560 * sc, 0), ImVec2(560 * sc, max_h));
 	bool open = true;
 	char title[128];
 	snprintf(title, sizeof title, "T7 Ghost AI  v" T7_VERSION_STR "   (%s to close)###t7panel", g_menu_key.name.c_str());
-	ImGui::Begin(title, &open, ImGuiWindowFlags_NoCollapse);
+	ImGui::Begin(title, &open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize);
 	if (!open)
 		g_menu_open = false;
 
@@ -225,93 +227,119 @@ void overlay_panel()
 	ImGui::Spacing();
 
 	auto save_int = [](const wchar_t *key, int v) { ini_set(L"ai", key, std::to_wstring(v)); };
-	bool en = c.enabled;
-	if (ImGui::Checkbox("AI enabled", &en))
-		c.enabled = en, save_int(L"mod_enabled", en);
-	ImGui::TextDisabled("replaces the CPU offline (never online): Practice at Ultra Hard, and");
-	bool ar = c.arcade, tr = c.treasure;
-	if (ImGui::Checkbox("Arcade Battle", &ar))
-		c.arcade = ar, save_int(L"arcade", ar);
-	ImGui::SameLine(200 * sc);
-	if (ImGui::Checkbox("Treasure Battle", &tr))
-		c.treasure = tr, save_int(L"treasure_battle", tr);
-	ImGui::TextDisabled("characters without a profile keep the game's own CPU");
-	ImGui::Spacing();
-
-	int v = c.reaction_frames;
-	if (setting_slider("Reaction time", v, 0, 30, "%d frames", "frames before it reacts to you (60 = 1 s). 13-15 = strong human"))
-		c.reaction_frames = v, save_int(L"reaction_frames", v);
-	v = c.input_read_chance;
-	if (setting_slider("Input read (cheat)", v, 0, 100, "%d %%", "chance per move that it knows your move the instant you press it. 0 = fair"))
-		c.input_read_chance = v, save_int(L"input_read_chance", v);
-	v = c.guard_skill;
-	if (setting_slider("Guard skill", v, 0, 100, "%d %%", "how often attacks it sees are guarded correctly"))
-		c.guard_skill = v, save_int(L"guard_skill", v);
-	v = c.decision_skill;
-	if (setting_slider("Decision skill", v, 0, 100, "%d %%", "How much the Ghosts favour attacks that are statistically proven to land more often than ones that whiffed or got counter-hit."))
-		c.decision_skill = v, save_int(L"decision_skill", v);
-	v = c.adapt;
-	if (setting_slider("Adapt to you", v, 0, 100, "%d %%", "how strongly it adapts to YOUR habits (remembered per character you use)"))
-		c.adapt = v, save_int(L"adapt", v);
-	v = c.throw_break;
-	const char *tfmt = v == 0 ? "player's own rate" : v == 1 ? "never" : "%d %%";
-	if (setting_slider("Throw breaks", v, 0, 100, tfmt, "0 = the real player's own break rate, 1 = never, 2-100 = chance"))
-		c.throw_break = v, save_int(L"throw_break_chance", v);
-	v = c.punish_skill;
-	if (setting_slider("Punishment Proficiency", v, 0, 100, "%d %%", "0% = the Ghost punishes with the real player's own punishers and timing. 1-100% = the chance that a punish is perfect: the best punish for that opening (-10, -13, -15, lows, whiffs), on the first possible frame, never delayed or too slow. Characters without recorded punishes keep the player's own."))
-		c.punish_skill = v, save_int(L"punish_proficiency", v);
+	// three categories, each a dropdown (closed until opened; 2026-10-19, the panel had grown long)
+	if (ImGui::CollapsingHeader("Ghost AI Settings"))
 	{
-		static const char *styles[] = { "Player's own combo habits", "Finish combos when appropriate", "Always finish combos" };
-		int cs = std::clamp(c.combo_style, 0, 2);
-		ImGui::SetNextItemWidth(300 * sc);
-		if (ImGui::Combo("Combos", &cs, styles, 3))
-			c.combo_style = cs, save_int(L"combo_style", cs);
-		help(cs == 0 ? "After a launch the Ghost continues with the recorded player's own combos, drops and all."
-			: cs == 1 ? "After a launch the Ghost plays a full combo route for that launcher. It stops early when a hit doesn't connect or a wall is close (no unwanted wall splat), and the player's own habits take over. Launchers without a route use the player's own habits."
-			: "After a launch the Ghost plays a full combo route for that launcher to the end, whatever happens. Launchers without a route use the player's own habits.");
-	}
-	ImGui::Spacing();
-
-	// wall awareness: switch + what the AI currently thinks about walls
-	bool wa = c.wall_awareness;
-	if (ImGui::Checkbox("Wall awareness", &wa))
-		c.wall_awareness = wa, save_int(L"wall_awareness", wa);
-	{
-		const auto &w = b->wall_info;
-		static const char *names[] = { "off", "no walls on this stage", "not concerned about walls",
-			"back to the wall - getting out", "cornered - defensive, looking for a throw", "you're at the wall - pressing" };
-		static const ImVec4 cols[] = { ImVec4(0.6f, 0.6f, 0.6f, 1), ImVec4(0.6f, 0.6f, 0.6f, 1), ImVec4(0.75f, 0.85f, 0.75f, 1),
-			ImVec4(0.95f, 0.75f, 0.3f, 1), ImVec4(0.95f, 0.45f, 0.3f, 1), ImVec4(0.45f, 0.75f, 1.0f, 1) };
-		const int st = std::clamp(w.state, 0, 5);
+		bool en = c.enabled;
+		if (ImGui::Checkbox("AI enabled", &en))
+			c.enabled = en, save_int(L"mod_enabled", en);
+		ImGui::TextDisabled("replaces the CPU offline (never online): Practice at Ultra Hard, and");
+		bool ar = c.arcade, tr = c.treasure;
+		if (ImGui::Checkbox("Arcade Battle", &ar))
+			c.arcade = ar, save_int(L"arcade", ar);
 		ImGui::SameLine(200 * sc);
-		ImGui::TextColored(cols[st], "%s", names[st]);
-		static const char *types[] = { "wall", "balcony", "breakable wall" };
-		help("Tick to let the location of nearby walls influence the Ghost's behaviors. Ghosts will sidestep away from walls, defend near corners, pressure you against walls.");
-		if (w.state >= ghost::Brain::kWsCalm)
+		if (ImGui::Checkbox("Treasure Battle", &tr))
+			c.treasure = tr, save_int(L"treasure_battle", tr);
+		ImGui::TextDisabled("characters without a profile keep the game's own CPU");
+		ImGui::Spacing();
+
+		// Ghost AI Preset: a ready-made configuration locks the settings below; Custom Settings = your own
 		{
-			char mine[48] = "-", yours[48] = "-";
-			if (w.my_back >= 0 && w.my_back < 1e8f)
-				snprintf(mine, sizeof mine, "%.1f m (%s)", w.my_back / 1000.0f, types[std::clamp(w.my_type, 0, 2)]);
-			if (w.opp_back >= 0 && w.opp_back < 1e8f)
-				snprintf(yours, sizeof yours, "%.1f m (%s)", w.opp_back / 1000.0f, types[std::clamp(w.opp_type, 0, 2)]);
-			ImGui::TextDisabled("behind it: %s   behind you: %s   %s", mine, yours, w.level);
+			int p = std::clamp(c.ai_preset, 0, int(std::size(ghost::kAiPresetNames)) - 1);
+			ImGui::SetNextItemWidth(300 * sc);
+			if (ImGui::Combo("Ghost AI Preset", &p, ghost::kAiPresetNames, int(std::size(ghost::kAiPresetNames))))
+			{
+				save_int(L"ai_preset", p);
+				read_ai_values(c); // custom values from the ini, then the preset on top
+			}
+			static const char *ph[] = {
+				"Your own settings below.",
+				"The Ghosts play almost purely like the recorded players: human reaction time, no input reading, the players' own guarding, punishing, throw breaks and combos. Note: although Fair aims to stay true to the learned player data, a Ghost may play easier than the real player, simply because there may not be enough recorded data to truly capture their playstyle.",
+				"A step up: faster reactions, some input reading, better guarding and punishing, full combos.",
+				"Fast reactions, frequent input reading, perfect guards, strong punishing and full combos.",
+				"Ridiculously difficult: very fast reactions, reads every move, perfect guards, punishes and throw breaks, adapts to you fully." };
+			help(ph[p]);
 		}
+		ImGui::BeginDisabled(c.ai_preset != 0);
+
+		int v = c.reaction_frames;
+		if (setting_slider("Reaction time", v, 0, 30, "%d frames", "frames before it reacts to you (60 = 1 s). 13-15 = strong human"))
+			c.reaction_frames = v, save_int(L"reaction_frames", v);
+		v = c.input_read_chance;
+		if (setting_slider("Input read (cheat)", v, 0, 100, "%d %%", "chance per move that it knows your move the instant you press it. 0 = fair"))
+			c.input_read_chance = v, save_int(L"input_read_chance", v);
+		v = c.guard_skill;
+		if (setting_slider("Guard skill", v, 0, 100, "%d %%", "how often attacks it sees are guarded correctly"))
+			c.guard_skill = v, save_int(L"guard_skill", v);
+		v = c.decision_skill;
+		if (setting_slider("Decision skill", v, 0, 100, "%d %%", "How much the Ghosts favour attacks that are statistically proven to land more often than ones that whiffed or got counter-hit."))
+			c.decision_skill = v, save_int(L"decision_skill", v);
+		v = c.adapt;
+		if (setting_slider("Adapt to you", v, 0, 100, "%d %%", "how strongly it adapts to YOUR habits (remembered per character you use)"))
+			c.adapt = v, save_int(L"adapt", v);
+		v = c.throw_break;
+		const char *tfmt = v == 0 ? "player's own rate" : v == 1 ? "never" : "%d %%";
+		if (setting_slider("Throw breaks", v, 0, 100, tfmt, "0 = the real player's own break rate, 1 = never, 2-100 = chance"))
+			c.throw_break = v, save_int(L"throw_break_chance", v);
+		v = c.punish_skill;
+		if (setting_slider("Punishment Proficiency", v, 0, 100, "%d %%", "0% = the Ghost punishes with the real player's own punishers and timing. 1-100% = the chance that a punish is perfect: the best punish for that opening (-10, -13, -15, lows, whiffs), on the first possible frame, never delayed or too slow. Characters without recorded punishes keep the player's own."))
+			c.punish_skill = v, save_int(L"punish_proficiency", v);
+		{
+			static const char *styles[] = { "Player's own combo habits", "Finish combos when appropriate", "Always finish combos" };
+			int cs = std::clamp(c.combo_style, 0, 2);
+			ImGui::SetNextItemWidth(300 * sc);
+			if (ImGui::Combo("Combos", &cs, styles, 3))
+				c.combo_style = cs, save_int(L"combo_style", cs);
+			help(cs == 0 ? "After a launch the Ghost continues with the recorded player's own combos, drops and all."
+				: cs == 1 ? "After a launch the Ghost plays a full combo route for that launcher. It stops early when a hit doesn't connect or a wall is close (no unwanted wall splat), and the player's own habits take over. Launchers without a route use the player's own habits."
+				: "After a launch the Ghost plays a full combo route for that launcher to the end, whatever happens. Launchers without a route use the player's own habits.");
+		}
+		ImGui::Spacing();
+
+		// wall awareness: switch + what the AI currently thinks about walls
+		bool wa = c.wall_awareness;
+		if (ImGui::Checkbox("Wall awareness", &wa))
+			c.wall_awareness = wa, save_int(L"wall_awareness", wa);
+		{
+			const auto &w = b->wall_info;
+			static const char *names[] = { "off", "no walls on this stage", "not concerned about walls",
+				"back to the wall - getting out", "cornered - defensive, looking for a throw", "you're at the wall - pressing" };
+			static const ImVec4 cols[] = { ImVec4(0.6f, 0.6f, 0.6f, 1), ImVec4(0.6f, 0.6f, 0.6f, 1), ImVec4(0.75f, 0.85f, 0.75f, 1),
+				ImVec4(0.95f, 0.75f, 0.3f, 1), ImVec4(0.95f, 0.45f, 0.3f, 1), ImVec4(0.45f, 0.75f, 1.0f, 1) };
+			const int st = std::clamp(w.state, 0, 5);
+			ImGui::SameLine(200 * sc);
+			ImGui::TextColored(cols[st], "%s", names[st]);
+			static const char *types[] = { "wall", "balcony", "breakable wall" };
+			help("Tick to let the location of nearby walls influence the Ghost's behaviors. Ghosts will sidestep away from walls, defend near corners, pressure you against walls.");
+			if (w.state >= ghost::Brain::kWsCalm)
+			{
+				char mine[48] = "-", yours[48] = "-";
+				if (w.my_back >= 0 && w.my_back < 1e8f)
+					snprintf(mine, sizeof mine, "%.1f m (%s)", w.my_back / 1000.0f, types[std::clamp(w.my_type, 0, 2)]);
+				if (w.opp_back >= 0 && w.opp_back < 1e8f)
+					snprintf(yours, sizeof yours, "%.1f m (%s)", w.opp_back / 1000.0f, types[std::clamp(w.opp_type, 0, 2)]);
+				ImGui::TextDisabled("behind it: %s   behind you: %s   %s", mine, yours, w.level);
+			}
+		}
+		ImGui::EndDisabled();
+		ImGui::Spacing();
 	}
-	ImGui::Spacing();
 
 	// Ghost Battle Mode (Treasure Battle reworked)
 #ifndef T7_PUBLIC
-	ImGui::SeparatorText("Combo recording (dev)");
-	if (ImGui::Button(g_rec.f && g_rec.combo ? "Stop combo recording" : "Start combo recording"))
-		g_combo_toggle = true;
-	ImGui::SameLine();
-	ImGui::TextDisabled("Practice: demonstrate combos -> t7ghost/combos (also Ctrl+F12)");
-	ImGui::Spacing();
+	if (ImGui::CollapsingHeader("Combo recording (dev)"))
+	{
+		if (ImGui::Button(g_rec.f && g_rec.combo ? "Stop combo recording" : "Start combo recording"))
+			g_combo_toggle = true;
+		ImGui::SameLine();
+		ImGui::TextDisabled("Practice: demonstrate combos -> t7ghost/combos (also Ctrl+F12)");
+		ImGui::Spacing();
+	}
 #endif
-	ImGui::SeparatorText("Ghost Battle Mode");
+	if (ImGui::CollapsingHeader("Ghost Battle Mode Settings"))
 	{
 		auto save_gb = [](const wchar_t *key, int v) { ini_set(L"ghost_battle", key, std::to_wstring(v)); };
-		bool g = c.ghost_battle, rs = c.gb_random_stage, go = c.gb_ghost_opponents, sf = c.gb_special_fights, dc = c.gb_default_costumes;
+		bool g = c.ghost_battle, rs = c.gb_random_stage, go = c.gb_ghost_opponents, sf = c.gb_special_fights;
 		bool rp = c.gb_random_player, em = c.gb_end_menu, rn = c.gb_rename, hc = c.gb_hide_chests, nm = c.gb_native_menu;
 		const auto row = [&](const char *label, bool &v, bool &field, const wchar_t *key, const char *text) {
 			if (ImGui::Checkbox(label, &v))
@@ -323,7 +351,16 @@ void overlay_panel()
 		row("Random stage", rs, c.gb_random_stage, L"random_stage", "A new random stage every match (the game normally keeps one stage for five fights).");
 		row("Only enable Ghost AI Characters", go, c.gb_ghost_opponents, L"ghost_opponents", "Only queue characters that have Ghost data. Characters without Ghost data will never appear with this option ticked.");
 		row("Special fights", sf, c.gb_special_fights, L"special_fights", "Tick to allow the special fight encounters from the vanilla Treasure Battle mode (e.g. Turbo Mode and Boss Fights). Untick to disable these fights completely.");
-		row("Force default costumes", dc, c.gb_default_costumes, L"default_costumes", "Force all opponents to use the character's default 1P Costume instead of customized outfits.");
+		{
+			static const char *cos[] = { "Allow Customized Costumes", "1P Costumes Only", "1P, 2P, 3P, 4P Costumes Only" };
+			int v = std::clamp(c.gb_costumes, 0, 2);
+			ImGui::SetNextItemWidth(300 * sc);
+			if (ImGui::Combo("Costumes", &v, cos, 3))
+				c.gb_costumes = v, save_gb(L"costumes", v);
+			help(v == 0 ? "Opponents wear their ranked ghosts' own customized outfits."
+				: v == 1 ? "Every opponent wears the character's default 1P costume."
+				: "Every opponent wears a random one of the character's 1P, 2P, 3P and 4P costumes (3P and 4P only for the characters that have them).");
+		}
 		row("End-of-match menu", em, c.gb_end_menu, L"end_menu", "Tick to enable Ghost Battle's custom end of match menu options (choose the next opponent, rematch with same stage, rematch on new stage, etc)");
 		row("   Native look", nm, c.gb_native_menu, L"native_menu", "Show the end-of-match menu inside the game's own result window. Untick to use the overlay menu instead.");
 		row("Call it GHOST BATTLE", rn, c.gb_rename, L"rename", "The main menu calls the mode GHOST BATTLE instead of TREASURE BATTLE.");
@@ -332,11 +369,23 @@ void overlay_panel()
 		ImGui::EndDisabled();
 		if (gb::g_status[0])
 			ImGui::TextDisabled("%s", gb::g_status);
+		ImGui::Spacing();
 	}
-	ImGui::Spacing();
 
 	// profiles per character
-	if (!g_ov.choices.empty() && ImGui::CollapsingHeader("Who it imitates"))
+	// Game Modifiers: change the fighting itself (offline only, from the next match)
+	if (ImGui::CollapsingHeader("Game Modifiers"))
+	{
+		auto save_mod = [](const wchar_t *key, bool v) { ini_set(L"modifiers", key, std::to_wstring(int(v))); };
+		bool nr = c.mod_no_rage;
+		if (ImGui::Checkbox("No Rage", &nr))
+			c.mod_no_rage = nr, save_mod(L"no_rage", nr);
+		help("Nobody gets rage: no rage damage boost, no Rage Arts or Rage Drives.");
+		ImGui::TextDisabled("offline battles only; changes take effect from the next match");
+		ImGui::Spacing();
+	}
+
+	if (!g_ov.choices.empty() && ImGui::CollapsingHeader("Imitation Settings"))
 	{
 		for (auto &[cid, opts] : g_ov.choices)
 		{
@@ -357,7 +406,8 @@ void overlay_panel()
 				ImGui::EndCombo();
 			}
 		}
-		ImGui::TextDisabled("merged = all recorded players as one; hybrid = main player's style, others fill gaps");
+		ImGui::TextDisabled("who each character's Ghost imitates - merged = all recorded players as one;");
+		ImGui::TextDisabled("hybrid = main player's style, others fill gaps; or one recorded player only");
 		ImGui::Spacing();
 	}
 
@@ -365,6 +415,7 @@ void overlay_panel()
 	if (ImGui::Button("Reset to defaults"))
 	{
 		const ghost::Settings d{};
+		c.ai_preset = d.ai_preset, save_int(L"ai_preset", d.ai_preset);
 		c.enabled = d.enabled, c.reaction_frames = d.reaction_frames, c.input_read_chance = d.input_read_chance;
 		c.punish_skill = d.punish_skill, c.combo_style = d.combo_style, c.guard_skill = d.guard_skill, c.decision_skill = d.decision_skill;
 		c.adapt = d.adapt, c.throw_break = d.throw_break, c.wall_awareness = d.wall_awareness;
@@ -376,9 +427,11 @@ void overlay_panel()
 		const auto gb = [](const wchar_t *key, bool &field, bool v) { field = v, ini_set(L"ghost_battle", key, std::to_wstring(int(v))); };
 		gb(L"enabled", c.ghost_battle, d.ghost_battle), gb(L"random_stage", c.gb_random_stage, d.gb_random_stage);
 		gb(L"ghost_opponents", c.gb_ghost_opponents, d.gb_ghost_opponents), gb(L"special_fights", c.gb_special_fights, d.gb_special_fights);
-		gb(L"default_costumes", c.gb_default_costumes, d.gb_default_costumes), gb(L"end_menu", c.gb_end_menu, d.gb_end_menu);
+		c.gb_costumes = d.gb_costumes, ini_set(L"ghost_battle", L"costumes", std::to_wstring(d.gb_costumes));
+		gb(L"end_menu", c.gb_end_menu, d.gb_end_menu);
 		gb(L"rename", c.gb_rename, d.gb_rename), gb(L"hide_chests", c.gb_hide_chests, d.gb_hide_chests);
 		gb(L"random_player", c.gb_random_player, d.gb_random_player), gb(L"native_menu", c.gb_native_menu, d.gb_native_menu);
+		c.mod_no_rage = d.mod_no_rage, ini_set(L"modifiers", L"no_rage", std::to_wstring(int(d.mod_no_rage)));
 	}
 	ImGui::SameLine();
 	const bool armed = GetTickCount64() < g_ov.forget_armed;

@@ -43,7 +43,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 
 namespace {
 
-#define T7_VERSION_STR "0.8.5" // keep in step with the t7ghost.ini header (tools/write_ini.py)
+#define T7_VERSION_STR "1.0a" // keep in step with the t7ghost.ini header (tools/write_ini.py)
 constexpr const char *kModVersion = T7_VERSION_STR;
 std::wstring g_dir; // .../Win64/t7ghost/
 FILE *g_log = nullptr;
@@ -448,11 +448,12 @@ void toggle_watch()
 		std::lock_guard lk(g_hits_mx);
 		g_hits.clear();
 	}
-	const uintptr_t p2 = blk + t7::kP2;
-	logf("watch: stage A, P2 input_dir @%p, input_attack @%p (ring copy %p)", (void *)(p2 + 0xDDC), (void *)(p2 + 0x1A5C), (void *)blk);
+	// rage recon (2026-10-19, No Rage): who writes the live players' rage flag +0xC00 (Ctrl+F10 on/off)
+	const uintptr_t lp1 = t7::exe_base() + t7::kLiveP1, lp2 = t7::exe_base() + t7::kLiveP2;
+	logf("watch: P1 rage state +0x780 @%p, rage used +0x754 @%p", (void *)(lp1 + 0x780), (void *)(lp1 + 0x754));
 	g_live_src = 0;
-	g_watch_stage = 1;
-	set_debug_regs(p2 + 0xDDC, p2 + 0x1A5C, true);
+	g_watch_stage = 2;
+	set_debug_regs(lp1 + 0x780, lp1 + 0x754, true);
 	g_watching = true;
 }
 
@@ -475,6 +476,28 @@ std::atomic<ghost::Brain *> g_brain = nullptr;
 std::atomic<bool> g_ai_active = false;
 std::atomic<int> g_ai_idx = -1; // side the AI drives while active (0 = P1, 1 = P2)
 
+// the Ghost AI values as saved in the ini (Custom Settings); a chosen preset overrides them in memory only
+void read_ai_values(ghost::Settings &c)
+{
+	const std::wstring ini = g_dir + L"t7ghost.ini";
+	auto geti = [&](const wchar_t *sec, const wchar_t *key, int def) { return int(GetPrivateProfileIntW(sec, key, def, ini.c_str())); };
+	c.reaction_frames = std::clamp(geti(L"ai", L"reaction_frames", 14), 0, 60);
+	c.input_read_chance = std::clamp(geti(L"ai", L"input_read_chance", 0), 0, 100);
+	c.punish_skill = std::clamp(geti(L"ai", L"punish_proficiency", 50), 0, 100);
+	// combo_style 0/1/2 (2026-10-19); an older ini's combos=0 meant no juggle follow-ups: own habits then
+	c.combo_style = std::clamp(geti(L"ai", L"combo_style", geti(L"ai", L"combos", 1) ? 1 : 0), 0, 2);
+	c.guard_skill = std::clamp(geti(L"ai", L"guard_skill", 100), 0, 100);
+	c.decision_skill = std::clamp(geti(L"ai", L"decision_skill", 60), 0, 100);
+	c.adapt = std::clamp(geti(L"ai", L"adapt", 70), 0, 100);
+	c.throw_break = std::clamp(geti(L"ai", L"throw_break_chance", 0), 0, 100);
+	c.wall_awareness = geti(L"ai", L"wall_awareness", 1) != 0;
+	// hidden option (author, 2026-10-19): not in the panel or the written ini; "taunts=0" typed into [ai]
+	// switches the Ghosts' taunts off
+	c.taunts = geti(L"ai", L"taunts", 1) != 0;
+	c.ai_preset = std::clamp(geti(L"ai", L"ai_preset", 3), 0, int(std::size(ghost::kAiPresets)) - 1);
+	ghost::apply_ai_preset(c, c.ai_preset);
+}
+
 ghost::Brain *load_brain()
 {
 	auto *b = new ghost::Brain();
@@ -482,29 +505,23 @@ ghost::Brain *load_brain()
 	auto geti = [&](const wchar_t *sec, const wchar_t *key, int def) { return int(GetPrivateProfileIntW(sec, key, def, ini.c_str())); };
 	// "mod_enabled" since v0.5 (ini layout); "enabled" still read for older ini files
 	b->cfg.enabled = geti(L"ai", L"mod_enabled", geti(L"ai", L"enabled", 1)) != 0;
-	b->cfg.reaction_frames = std::clamp(geti(L"ai", L"reaction_frames", 14), 0, 60);
-	b->cfg.input_read_chance = std::clamp(geti(L"ai", L"input_read_chance", 0), 0, 100);
 	b->cfg.punish = true; // the old on/off switch: now Punishment Proficiency (0 = the player's own punishers)
-	b->cfg.punish_skill = std::clamp(geti(L"ai", L"punish_proficiency", 50), 0, 100);
-	// combo_style 0/1/2 (2026-10-19); an older ini's combos=0 meant no juggle follow-ups: own habits then
-	b->cfg.combo_style = std::clamp(geti(L"ai", L"combo_style", geti(L"ai", L"combos", 1) ? 1 : 0), 0, 2);
-	b->cfg.guard_skill = std::clamp(geti(L"ai", L"guard_skill", 100), 0, 100);
-	b->cfg.decision_skill = std::clamp(geti(L"ai", L"decision_skill", 60), 0, 100);
-	b->cfg.adapt = std::clamp(geti(L"ai", L"adapt", 70), 0, 100);
-	b->cfg.throw_break = std::clamp(geti(L"ai", L"throw_break_chance", 0), 0, 100);
-	b->cfg.wall_awareness = geti(L"ai", L"wall_awareness", 1) != 0;
+	read_ai_values(b->cfg); // the Ghost AI sliders (or the chosen Ghost AI Preset)
 	b->cfg.arcade = geti(L"ai", L"arcade", 1) != 0;
 	b->cfg.treasure = geti(L"ai", L"treasure_battle", 1) != 0;
 	b->cfg.ghost_battle = geti(L"ghost_battle", L"enabled", 1) != 0;
 	b->cfg.gb_random_stage = geti(L"ghost_battle", L"random_stage", 1) != 0;
 	b->cfg.gb_ghost_opponents = geti(L"ghost_battle", L"ghost_opponents", 1) != 0;
 	b->cfg.gb_special_fights = geti(L"ghost_battle", L"special_fights", 0) != 0;
-	b->cfg.gb_default_costumes = geti(L"ghost_battle", L"default_costumes", 0) != 0;
+	// costumes 0/1/2 (2026-10-19); an older ini's default_costumes=1 meant 1P costumes only
+	b->cfg.gb_costume_test = std::clamp(geti(L"ghost_battle", L"costume_test", 0), 0, 3);
+	b->cfg.gb_costumes = std::clamp(geti(L"ghost_battle", L"costumes", geti(L"ghost_battle", L"default_costumes", 0) ? 1 : 0), 0, 2);
 	b->cfg.gb_random_player = geti(L"ghost_battle", L"random_player", 0) != 0;
 	b->cfg.gb_end_menu = geti(L"ghost_battle", L"end_menu", 1) != 0;
 	b->cfg.gb_native_menu = geti(L"ghost_battle", L"native_menu", 1) != 0;
 	b->cfg.gb_rename = geti(L"ghost_battle", L"rename", 1) != 0;
 	b->cfg.gb_hide_chests = geti(L"ghost_battle", L"hide_chests", 1) != 0;
+	b->cfg.mod_no_rage = geti(L"modifiers", L"no_rage", 0) != 0;
 
 	// profiles/index.txt lists "<char> <name> <frames>" best-first; [profiles] c<char>=<name> overrides
 	const std::wstring dir = g_dir + L"profiles/";
@@ -623,6 +640,15 @@ ghost::Brain *load_brain()
 			FindClose(h);
 		}
 		logf("brain: %d punishes for %zu characters (punishment proficiency %d%%)", n, b->punishes.size(), b->cfg.punish_skill);
+		n = 0;
+		if (HANDLE h = FindFirstFileW((g_dir + L"combos\\taunts_*.txt").c_str(), &fd); h != INVALID_HANDLE_VALUE)
+		{
+			do
+				n += ghost::load_taunts(g_dir + L"combos\\" + fd.cFileName, b->taunts);
+			while (FindNextFileW(h, &fd));
+			FindClose(h);
+		}
+		logf("brain: %d taunts for %zu characters (taunts %s)", n, b->taunts.size(), b->cfg.taunts ? "on" : "off");
 	}
 	if (ghost::load_framedata(g_dir + L"framedata.txt", b->framedata))
 		logf("brain: frame data for %zu moves", b->framedata.size());
@@ -690,6 +716,57 @@ int ai_side(const ghost::Settings &cfg)
 	return -1;
 }
 
+// Game Modifiers: offline battles only (game mode 2: Practice, VS, Arcade, Treasure / Ghost Battle - never
+// online or replays). The settings are latched when a battle starts, so a change applies from the next match.
+// Runs on the game thread, once per player per frame (decode_hook).
+struct Mods { bool no_rage = false; } g_mods;
+std::atomic<bool> g_mods_relatch{ false }; // a new match without leaving the mode (Ghost Battle's next fight)
+void mods_tick(uintptr_t p, int idx, const ghost::Brain *b)
+{
+	static int prev_mode = -1;
+	static uint64_t last_call = 0;
+	const int mode = t7::read_global(t7::kGameMode);
+	bool new_match = false;
+	if (idx == 0)
+	{
+		// a new match: the mode starts, Ghost Battle's next fight, or the fight resumes after a loading screen
+		// (no input processing for > 1.5 s - rematches and Character Select stay in mode 2) at full health
+		const uint64_t now = GetTickCount64();
+		int32_t h1 = 0, h2 = 0;
+		const uintptr_t base = t7::exe_base();
+		const bool fresh = now - last_call > 1500 && t7::rd(base + t7::kLiveP1 + 0x1508, h1) &&
+			t7::rd(base + t7::kLiveP2 + 0x1508, h2) && h1 >= 100 && h2 >= 100;
+		last_call = now;
+		new_match = mode != prev_mode || g_mods_relatch.exchange(false) || fresh;
+		prev_mode = mode;
+	}
+	if (new_match && mode == t7::kModePractice && b)
+	{
+		const Mods was = g_mods;
+		g_mods.no_rage = b->cfg.mod_no_rage;
+		if (was.no_rage && !g_mods.no_rage)
+			for (const uintptr_t pl : { t7::exe_base() + t7::kLiveP1, t7::exe_base() + t7::kLiveP2 })
+			{
+				uint8_t f = 0; // give rage back: clear our "rage used" mark
+				if (t7::rd(pl + 0x757, f) && (f & 4))
+					*reinterpret_cast<volatile uint8_t *>(pl + 0x757) = uint8_t(f & ~4);
+			}
+		logf("mods: new match: no rage %s", g_mods.no_rage ? "on" : "off");
+	}
+	if (mode != t7::kModePractice)
+		return;
+	if (g_mods.no_rage)
+	{
+		// rage (2026-10-19, VS dumps in / out of / after rage): +0x781 = in rage (the game copies it in from
+		// its state each frame), +0xC00 = the aura (exe+0x722C60 turns it on when +0x781 becomes 1). Clearing
+		// them made the game start rage again every frame (endless activation effect). Instead: +0x757
+		// bit 0x4 is only set once rage has been used ("rage spent" dump: 9 -> 13) - set it from the start.
+		uint8_t f = 0;
+		if (t7::rd(p + 0x757, f) && !(f & 4))
+			*reinterpret_cast<volatile uint8_t *>(p + 0x757) = uint8_t(f | 4);
+	}
+}
+
 std::atomic<uint32_t> g_decode_calls[3] = {}; // recon: decode_input calls for P1 / P2 / other objects
 std::atomic<uint32_t> g_decode_input[2] = {};  // recon: frames with any held input, per side
 
@@ -701,6 +778,8 @@ void __fastcall decode_hook(uintptr_t p, int side, uint32_t held, uint32_t press
 	if (idx >= 0 && held)
 		++g_decode_input[idx];
 	ghost::Brain *b = idx >= 0 ? g_brain.load() : nullptr;
+	if (idx >= 0)
+		mods_tick(p, idx, b);
 	const int ai = b ? ai_side(b->cfg) : -1;
 	if (idx >= 0 && ai < 0 && g_ai_active.exchange(false))
 	{
@@ -919,6 +998,47 @@ void dump_players()
 	const bool g = dump(L"_globals.bin", base + 0x3447000, 0x2000); // around the practice CPU globals
 	logf("dump: players %s/%s, globals %s (mode %d, stage %d)", a ? "ok" : "FAIL", b ? "ok" : "FAIL", g ? "ok" : "FAIL",
 		t7::read_global(t7::kGameMode), t7::read_global(t7::kStageId));
+	// costume recon (2026-10-19, preset costumes): the battle settings with both sides' costume blocks
+	// (+0xB8 + side*0x460) and both player-info entries
+	const uintptr_t cfg = gb::battle_cfg(), i0 = gb::player_info(0), i1 = gb::player_info(1);
+	const bool cf = cfg && dump(L"_cfg.bin", cfg, 0x1000);
+	const bool in = i0 && i1 && dump(L"_info0.bin", i0, 0x400) && dump(L"_info1.bin", i1, 0x400);
+	if (cfg)
+		for (int s = 0; s < 2; ++s)
+		{
+			uint32_t w[4] = {};
+			t7::safe_copy(w, cfg + gb::kCfgCostume + s * gb::kCostumeStride, sizeof w);
+			int32_t ch = -1;
+			t7::rd(cfg + gb::kCfgChar + s * 4, ch);
+			logf("dump: side %d char %d costume block %08X %08X %08X %08X", s, ch, w[0], w[1], w[2], w[3]);
+		}
+	logf("dump: cfg %s, infos %s", cf ? "ok" : "FAIL", in ? "ok" : "FAIL");
+	// list-file recon (preset costumes): globals near exe+0x34CE8A0 that are "list" objects - +0x28/+0x30
+	// = vector of loaded files, data = [[file]+0x48] (0x329170). Dump each file's data (header: +8 u16 count).
+	int lists = 0;
+	for (uintptr_t g = 0x34CE000; g < 0x34D0000; g += 8)
+	{
+		uintptr_t obj = 0, b0 = 0, b1 = 0;
+		if (!t7::rd(base + g, obj) || obj < 0x10000 || !t7::rd(obj + 0x28, b0) || !t7::rd(obj + 0x30, b1) ||
+			!b0 || b1 < b0 || b1 - b0 > 64 * 8 || (b1 - b0) % 8)
+			continue;
+		for (uintptr_t k = 0; k * 8 < b1 - b0; ++k)
+		{
+			uintptr_t file = 0, vt = 0, data = 0;
+			if (!t7::rd(b0 + k * 8, file) || !file || !t7::rd(file, vt) || !vt || !t7::rd(vt + 0x48, data) || !data)
+				continue;
+			uint16_t count = 0;
+			t7::rd(data + 8, count);
+			wchar_t sfx[64];
+			swprintf(sfx, 64, L"_list_%X_%u.bin", unsigned(g), unsigned(k));
+			size_t n = 0x40000;
+			while (n >= 0x400 && !dump(sfx, data, n))
+				n /= 2;
+			logf("dump: list global +0x%X file %u data count %u (%zu bytes saved)", unsigned(g), unsigned(k), count, n >= 0x400 ? n : 0);
+			++lists;
+		}
+	}
+	logf("dump: %d list files", lists);
 }
 
 void survey_tick()

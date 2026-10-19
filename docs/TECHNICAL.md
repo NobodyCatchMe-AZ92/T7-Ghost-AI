@@ -161,6 +161,39 @@ Punishment Proficiency rolls once per blockstun; on success the punish needing t
 the window and reaches is played (launch punishes first among equals), timed so the author's first free
 frame lands on ours.
 
+## Taunts (`analysis/taunts.py`, `src/brain.hpp`)
+
+Every KO in the demonstration recordings (the loser's health goes to 0, the winner's is above 0) gives one
+taunt: the winner's player-relative inputs from the KO frame to the end of the round (trailing idle frames
+trimmed). `taunts_<char>.txt`: `char <id>`, then `frames | held:frames,...` per taunt. When a Ghost KOs its
+opponent it plays a random taunt of its character with a 15% chance, 75% if its own health is still at
+least 75%. A hidden ini key (`[ai] taunts=0`, not written by default) switches it off.
+
+## Ghost AI presets (`src/brain.hpp` kAiPresets)
+
+A preset replaces the Ghost AI values in memory only (reaction time, input read, guard / decision skill,
+adaptation, throw breaks, punishment proficiency, combo style, wall awareness); the ini keeps the custom
+values. `[ai] ai_preset`: 0 Custom, 1 Fair, 2 Medium Challenge, 3 Challenging (default), 4 Unfair.
+
+## Ghost Battle costumes
+
+The costume of each side is a slot in the battle settings (`+0xB8 + side*0x460`, `+4`, setter
+`0x292CD0`) and in the player info (`+0xC0A8`, `0x3CD690`): 0-3 = 1P/2P/3P/4P, 4 = customized (the
+ranked ghost's own), 7 and up = Preset 1.. . Which characters have 3P/4P comes from the game's list file
+`customize_chara_list` (`[exe+0x34CE858]`, 24-byte entries: u8 character, u8 flag); the presets per
+character from `customize_preset_table_cs_s3` (`[exe+0x34CE898]`, 0x198-byte entries with up to 50
+preset names). List files: object +0x28 = vector of loaded files, data = `[[file]+0x48]`, data +8 = u16
+count, data +0 points to the list's own name. Presets on a ranked-ghost opponent leave Ghost Battle's
+loading screen hanging, so only 1P-4P are used.
+
+## Game Modifiers (`src/main.cpp` mods_tick)
+
+Offline battles only (game mode 2), settings latched at each new match (mode start, Ghost Battle's next
+fight, or the fight resuming after a loading screen with both players at full health). **No Rage**: the
+player byte `+0x757` bit `0x4` marks rage as used for the round; it is set for both players, so the game
+never grants rage (`+0x781` = in rage, `+0xC00` = the aura, synced by `0x722C60`). Clearing those two
+instead made the game start rage again every frame.
+
 ## Harvesters (`src/harvest.cpp`)
 
 The recorder alone, with no hooks: replay variant (records while game mode = 3, optional

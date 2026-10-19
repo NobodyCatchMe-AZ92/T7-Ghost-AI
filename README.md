@@ -22,6 +22,19 @@ your actual inputs rather than react to what it sees.
 
 Video demonstration of Katarina's Ghost AI (work in progress): https://streamable.com/447xkg
 
+### What's new in v1.0a
+The full list of changes in every version is in [CHANGELOG.md](CHANGELOG.md).
+- **Ghost AI Presets**: pick *Fair*, *Medium Challenge*, *Challenging* (default) or *Unfair* in the F1
+  panel and play - no sliders needed. *Custom Settings* keeps your own configuration.
+- **Game Modifiers** (offline only, from the next match, all off by default): **No Rage**.
+- **Taunts**: after KO'ing you, a Ghost sometimes taunts you - more often when it won with most of its
+  health left.
+- **Ghost Battle costumes**: *Allow Customized Costumes*, *1P Costumes Only*, or *1P, 2P, 3P, 4P
+  Costumes Only*.
+- Strings with a delayed follow-up (e.g. Julia's df+3, 1+2) no longer catch the Ghost after it blocks
+  the first hit.
+- Recorded combos and punishes always play to their end; a tidier F1 panel with dropdown categories.
+
 ### What's new in v0.8.5
 - **Punishment Proficiency** (F1 slider, replaces the Punish checkbox). 0% = the Ghost punishes with the
   real player's own punishers and timing. 1-100% = the chance that a punish is *perfect*: the best punish
@@ -109,15 +122,19 @@ observed by playing the replay back in-game.
 ## DOWNLOADING AND INSTALLING
 Available for download (see Releases):
 
-**The public build** of the Ghost AI with every Ghost (36 characters). Drop the contents of its `Win64`
+One zip with two folders - pick one:
+
+**T7 Ghost Mod 1.0a** - the Ghost AI with every Ghost (36 characters). Drop the contents of its `Win64`
 folder into `TEKKEN 7\TekkenGame\Binaries\Win64` (next to the game exe), then play Ghost Battle (the
 reworked Treasure Battle), Arcade Battle, or Practice with the opponent set to "CPU" on "Ultra Hard".
-Press F1 to tune the Ghosts in real time. The package's README.txt explains everything.
+Press F1 to tune the Ghosts in real time. Its README.txt explains everything; CHANGELOG.md lists what
+changed.
 
-**The Data Harvesters**, if you want to help populate the character data: put the harvester's
-`version.dll` next to your game exe, then send me the Ghost Data folders it creates
-(t7GhostLIVEplayData and t7GhostReplayData). Use the Replay Harvester while you watch your saved
-replays, and the Live Harvester while you play or spectate online matches.
+**Data Harvesters (for gathering and volunteering your own ghost data)** - if you want to help populate
+the character data: put a harvester's `version.dll` next to your game exe, then send me the Ghost Data
+folders it creates (t7GhostLIVEplayData and t7GhostReplayData). Use the Replay Harvester while you watch
+your saved replays, and the Live Harvester while you play or spectate online matches. Its README.txt
+explains everything.
 
 ### Please send all volunteered Ghost Data to the email address: DreamOfCasinoSoul@proton.me
 
@@ -173,7 +190,8 @@ See [docs/TECHNICAL.md](docs/TECHNICAL.md) for the memory layout, file formats, 
 | `analysis/` | Python: load recordings (replay and live), build profiles, frame data and wall maps; combo routes and punishes from Practice demonstrations |
 | `tools/` | ini writer, wall-survey checker, replay auto-pilot, memory peek/sampler helpers |
 | `dist/t7ghost.ini`, `dist/walls.txt` | default settings and the stage wall maps shipped with releases |
-| `dist/combos/` | the recorded combo routes (`routes_<char>.txt`) and punishes (`punishes_<char>.txt`) |
+| `dist/combos/` | the recorded combo routes (`routes_<char>.txt`), punishes (`punishes_<char>.txt`) and taunts (`taunts_<char>.txt`) |
+| `CHANGELOG.md` | what changed in each version |
 | `third_party/` | MinHook (BSD-2), Dear ImGui (MIT) |
 
 ## Building
@@ -193,6 +211,7 @@ py analysis/framedata.py      <recordings dir> [<more dirs>] <framedata.txt>
 py analysis/build_walls.py    <walls_survey.txt> <walls.txt>
 py analysis/combos.py         <combo recordings dir>     (routes_<char>.txt)
 py analysis/punishes.py       <combo recordings dir>     (punishes_<char>.txt)
+py analysis/taunts.py         <combo recordings dir>     (taunts_<char>.txt: the winner's inputs after a KO)
 ```
 
 ## Privacy

@@ -82,11 +82,92 @@ int option_rounds()
 	return n;
 }
 
-// costume mode 0 = the character's default costume (4 = the ranked ghost's own)
-void default_costume(uintptr_t cfg, int cs, uintptr_t cpu)
+// costume slot (cfg+0xB8+side*0x460, +4; recon 2026-10-19 on Paul): 0-3 = the stock 1P-4P costumes
+// ("Default 1-4"), 4 = customized (the ranked ghost's own outfit), 7-14 = Preset 1-8
+constexpr int kSlot1P = 0, kSlotPreset1 = 7;
+void set_costume(uintptr_t cfg, int cs, uintptr_t cpu, int slot)
 {
-	fn<void(__fastcall *)(uintptr_t, int)>(kFnCostumeSetMode)(cfg + kCfgCostume + cs * kCostumeStride, 0);
-	fn<void(__fastcall *)(uintptr_t, int)>(kFnInfoSetCostume)(cpu, 0);
+	fn<void(__fastcall *)(uintptr_t, int)>(kFnCostumeSetMode)(cfg + kCfgCostume + cs * kCostumeStride, slot);
+	fn<void(__fastcall *)(uintptr_t, int)>(kFnInfoSetCostume)(cpu, slot);
+}
+// How many Preset costumes a character has, from the game's own list file
+// customize_preset_table_cs_s3 (list object [exe+0x34CE898]: +0x28 vector of loaded files, data =
+// [[file]+0x48]; data +8 u16 count, entries of 0x198 from +0x10: u16 0xFF00|char, then up to 50 name
+// pointers, one per preset). A slot the character doesn't have leaves the fight loading forever.
+constexpr uintptr_t kPresetTable = 0x34CE898, kCharaList = 0x34CE858;
+// a game list file's data (first loaded file of the list object at exe+global)
+uintptr_t list_data(uintptr_t global)
+{
+	uintptr_t obj = 0, files = 0, file = 0, hdr = 0, data = 0;
+	if (!t7::rd(t7::exe_base() + global, obj) || !obj || !t7::rd(obj + 0x28, files) || !files ||
+		!t7::rd(files, file) || !file || !t7::rd(file, hdr) || !hdr || !t7::rd(hdr + 0x48, data))
+		return 0;
+	return data;
+}
+// Default 3 and 4 exist for this character: customize_chara_list ([exe+0x34CE858]), 24-byte entries
+// from +0x10, u8 character, u8 flag (set for Paul, King, Hwoarang, Xiaoyu, Bryan, Heihachi, Steve, Asuka,
+// Devil Jin, Feng, Lili, Dragunov, Leo, Alisa, Lee, Kuma, Panda - confirmed by the author)
+bool has_default34(int ch)
+{
+	const uintptr_t data = list_data(kCharaList);
+	uint16_t count = 0;
+	if (!data || !t7::rd(data + 8, count) || count > 128)
+		return false;
+	for (uintptr_t e = data + 0x10, end = e + count * 24; e < end; e += 24)
+	{
+		uint8_t id = 0, flag = 0;
+		if (t7::rd(e, id) && id == ch)
+			return t7::rd(e + 1, flag) && flag == 1;
+	}
+	return false;
+}
+int preset_count(int ch)
+{
+	const uintptr_t data = list_data(kPresetTable);
+	uint16_t count = 0;
+	if (!data || !t7::rd(data + 8, count) || count > 128)
+		return 0;
+	for (uintptr_t e = data + 0x10, end = e + count * 0x198; e < end; e += 0x198)
+	{
+		uint16_t key = 0;
+		if (!t7::rd(e, key) || (key & 0xFF) != ch)
+			continue;
+		int n = 0;
+		for (; n < 50; ++n)
+		{
+			uintptr_t name = 0;
+			char c0 = 0;
+			if (!t7::rd(e + 8 + n * 8, name) || !name || !t7::rd(name, c0) || !c0)
+				break;
+		}
+		return n;
+	}
+	return 0;
+}
+// the costume an opponent gets when not wearing a ranked ghost's own outfit (Costumes option):
+// 1P only, or (Default Preset Costumes Only) a random one of Default 1-2 (1-4 where the character has
+// them) and the character's presets
+int stock_costume(const ghost::Settings &c, int ch)
+{
+	if (c.gb_costumes != 2)
+		return kSlot1P;
+	// Presets are off for now: a preset on a ranked-ghost opponent leaves Ghost Battle loading forever
+	// (2026-10-19, author's test: Lei Preset 2 = slot 8 hung; Default 1-4 fine). A future update may enable them.
+	constexpr bool kUsePresets = false;
+	const int defaults = has_default34(ch) ? 4 : 2;
+	const int presets = kUsePresets || c.gb_costume_test == 2 ? preset_count(ch) : 0;
+	int pick = int(g_rng() % unsigned(defaults + presets));
+	if (c.gb_costume_test == 2 && presets > 0)
+		pick = defaults + int(g_rng() % unsigned(presets));
+	if (c.gb_costume_test == 3 && defaults == 4)
+		pick = 2 + int(g_rng() % 2u); // dev: force Default 3/4
+	const int slot = pick < defaults ? pick : kSlotPreset1 + (pick - defaults);
+	logf("gb: costume for char %d: slot %d (defaults %d, presets %d)", ch, slot, defaults, presets);
+	return slot;
+}
+void default_costume(uintptr_t cfg, int cs, uintptr_t cpu, const ghost::Settings &c, int ch)
+{
+	set_costume(cfg, cs, cpu, stock_costume(c, ch));
 }
 
 // the game's ranked ghosts whose character has a Ghost profile, by character
@@ -211,7 +292,7 @@ void apply(int type)
 		fn<void(__fastcall *)(uintptr_t, int, int)>(kFnCfgSetChar)(cfg, cs, g_now.ch);
 		fn<void(__fastcall *)(uintptr_t, int)>(kFnInfoSetChar)(cpu, g_now.ch);
 		opp = g_now.ch;
-		default_costume(cfg, cs, cpu);
+		default_costume(cfg, cs, cpu, c, opp);
 	}
 	else if (any_opp && c.gb_ghost_opponents && !b->profiles.empty() && !b->profiles.count(opp))
 	{
@@ -224,10 +305,10 @@ void apply(int type)
 		fn<void(__fastcall *)(uintptr_t, int, int)>(kFnCfgSetChar)(cfg, cs, o);
 		fn<void(__fastcall *)(uintptr_t, int)>(kFnInfoSetChar)(cpu, o);
 		opp = o;
-		default_costume(cfg, cs, cpu);
+		default_costume(cfg, cs, cpu, c, opp);
 	}
-	else if (c.gb_default_costumes)
-		default_costume(cfg, cs, cpu);
+	else if (c.gb_costumes != 0)
+		default_costume(cfg, cs, cpu, c, opp);
 	g_last_opp = opp, g_last_stage = stage;
 	// random player: one recorded player of this character imitates the ghost (loaded here, during loading)
 	std::shared_ptr<const ghost::Profile> solo;
@@ -243,6 +324,7 @@ void apply(int type)
 	b->solo.store(solo);
 	snprintf(g_status, sizeof g_status, "next fight: %s, stage %d, first to %d", b->profile_label(opp).c_str(), stage, rounds);
 	logf("gb: Ghost Battle -> vs %d, stage %d, rounds %d", opp, stage, rounds);
+	g_mods_relatch = true; // Game Modifiers: the new settings apply to this next fight
 }
 
 uintptr_t __fastcall next_hook(uintptr_t self, uintptr_t fight, uintptr_t r8, uintptr_t r9)
