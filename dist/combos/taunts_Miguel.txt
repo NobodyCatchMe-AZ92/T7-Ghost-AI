@@ -1,0 +1,3 @@
+# Miguel taunts (analysis/taunts.py): one per line - frames | inputs held:frames  # file ko-frame
+char 37
+147 | 4096:121,4104:2,12296:8,4104:1,4096:15  # combo_20261019_201855 2118

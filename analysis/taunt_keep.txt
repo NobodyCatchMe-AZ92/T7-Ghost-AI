@@ -1,0 +1,2 @@
+# Taunts to drop (analysis/taunts.py): -<character> <recording> <KO frame>   # why
+-Feng combo_20261019_201855 1928   # first Feng taunt; the author redid it at the end
