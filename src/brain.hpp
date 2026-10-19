@@ -20,7 +20,7 @@
 
 namespace ghost {
 
-// raw input bits (player-relative), see docs/TECHNICAL.md
+// raw input bits (player-relative)
 constexpr uint32_t U = 0x1, D = 0x2, B = 0x4, F = 0x8, DIRS = 0xF;
 
 enum Kind : int { kAttack = 0, kNeutral = 1, kWakeup = 2, kAir = 3 };
@@ -73,6 +73,136 @@ inline bool load_framedata(const std::wstring &path, FrameData &fd)
 		fd[move_key(ch, mv)] = m;
 	}
 	return !fd.empty();
+}
+
+// Combo routes the author demonstrated in Practice (analysis/combos.py -> combos/routes_<char>.txt):
+// what to play once a launcher (or a low parry) has put the opponent in the air
+struct Route
+{
+	enum Starter { kNormal, kCounter, kParry };
+	int starter = kNormal, launcher = 0, damage = 0, lead = 0;
+	std::vector<std::pair<int, int>> moves;   // move id, frame it started (from the launcher's start)
+	std::vector<uint32_t> inputs;             // one held word per frame, from `lead` frames before the launcher
+	std::vector<std::pair<int, float>> hits;  // damage frames (from the launcher's start), carry so far
+	std::string notation;
+	// punishes (punishes_<char>.txt): the opening, its window class (-10/-13/-15...) and the input frame of
+	// the first press (timed to our first possible frame)
+	enum Opening { kBlock, kLowBlock, kWhiff };
+	int opening = kBlock, window = 0, press = 0;
+	int reach = 0; // farthest distance the author started it from (and it connected)
+	int open = -1; // input frame of the author's first free frame (-1 = not in the file: time by press)
+	bool launches = false; // the punish launches (preferred over others needing the same window)
+};
+using Routes = std::unordered_map<int, std::vector<Route>>; // by character id
+
+// one file: "char <id>" then one route per line:
+// starter launcher hits damage frames lead | id@frame ... | held:frames,... | frame:carry,... | notation # ...
+inline int load_routes(const std::wstring &path, Routes &out)
+{
+	std::ifstream in(path);
+	std::string line;
+	int ch = -1, n = 0;
+	while (std::getline(in, line))
+	{
+		if (line.rfind("char ", 0) == 0)
+			ch = std::atoi(line.c_str() + 5);
+		if (ch < 0 || line.empty() || line[0] == '#' || line.rfind("char ", 0) == 0)
+			continue;
+		std::vector<std::string> f;
+		for (size_t a = 0, b; a <= line.size(); a = b + 1)
+		{
+			b = line.find('|', a);
+			if (b == std::string::npos)
+				b = line.size();
+			f.push_back(line.substr(a, b - a));
+		}
+		if (f.size() < 5)
+			continue;
+		Route r;
+		std::string st;
+		int hits = 0, frames = 0;
+		std::istringstream h(f[0]);
+		h >> st >> r.launcher >> hits >> r.damage >> frames >> r.lead;
+		r.starter = st == "counter_hit" ? Route::kCounter : st == "low_parry" ? Route::kParry : Route::kNormal;
+		std::istringstream mv(f[1]);
+		for (std::string t; mv >> t;)
+			if (const size_t at = t.find('@'); at != std::string::npos)
+				r.moves.push_back({ std::atoi(t.c_str()), std::atoi(t.c_str() + at + 1) });
+		std::istringstream inp(f[2]);
+		for (std::string t; std::getline(inp, t, ',');)
+			if (const size_t c = t.find(':'); c != std::string::npos)
+				r.inputs.insert(r.inputs.end(), std::atoi(t.c_str() + c + 1), uint32_t(std::stoul(t.substr(0, c))));
+		std::istringstream hs(f[3]);
+		for (std::string t; std::getline(hs, t, ',');)
+			if (const size_t c = t.find(':'); c != std::string::npos)
+				r.hits.push_back({ std::atoi(t.c_str()), float(std::atof(t.c_str() + c + 1)) });
+		r.notation = f[4].substr(0, f[4].find('#'));
+		r.notation.erase(0, r.notation.find_first_not_of(' '));
+		r.notation.erase(r.notation.find_last_not_of(' ') + 1);
+		if (r.inputs.empty() || r.moves.empty() || r.hits.empty())
+			continue;
+		out[ch].push_back(std::move(r));
+		++n;
+	}
+	return n;
+}
+
+// one file: "char <id>" then one punish per line (analysis/punishes.py):
+// kind window_class punisher hits damage frames lead press | id@frame ... | held:frames,... | damage frames | notation
+inline int load_punishes(const std::wstring &path, Routes &out)
+{
+	std::ifstream in(path);
+	std::string line;
+	int ch = -1, n = 0;
+	while (std::getline(in, line))
+	{
+		if (line.rfind("char ", 0) == 0)
+			ch = std::atoi(line.c_str() + 5);
+		if (ch < 0 || line.empty() || line[0] == '#' || line.rfind("char ", 0) == 0)
+			continue;
+		std::vector<std::string> f;
+		for (size_t a = 0, b; a <= line.size(); a = b + 1)
+		{
+			b = line.find('|', a);
+			if (b == std::string::npos)
+				b = line.size();
+			f.push_back(line.substr(a, b - a));
+		}
+		if (f.size() < 5)
+			continue;
+		Route r;
+		std::string kind;
+		int hits = 0, frames = 0;
+		std::istringstream h(f[0]);
+		h >> kind >> r.window >> r.launcher >> hits >> r.damage >> frames >> r.lead >> r.press;
+		if (!(h >> r.reach))
+			r.reach = 0;
+		if (!(h >> r.open))
+			r.open = -1;
+		int launch = 0;
+		if (h >> launch)
+			r.launches = launch != 0;
+		r.opening = kind == "low_block" ? Route::kLowBlock : kind == "whiff" ? Route::kWhiff : Route::kBlock;
+		std::istringstream mv(f[1]);
+		for (std::string t; mv >> t;)
+			if (const size_t at = t.find('@'); at != std::string::npos)
+				r.moves.push_back({ std::atoi(t.c_str()), std::atoi(t.c_str() + at + 1) });
+		std::istringstream inp(f[2]);
+		for (std::string t; std::getline(inp, t, ',');)
+			if (const size_t c = t.find(':'); c != std::string::npos)
+				r.inputs.insert(r.inputs.end(), std::atoi(t.c_str() + c + 1), uint32_t(std::stoul(t.substr(0, c))));
+		std::istringstream hs(f[3]);
+		for (std::string t; std::getline(hs, t, ',');)
+			r.hits.push_back({ std::atoi(t.c_str()), 0.0f });
+		r.notation = f[4].substr(0, f[4].find('#'));
+		r.notation.erase(0, r.notation.find_first_not_of(' '));
+		r.notation.erase(r.notation.find_last_not_of(' ') + 1);
+		if (r.inputs.empty() || r.press >= int(r.inputs.size()))
+			continue;
+		out[ch].push_back(std::move(r));
+		++n;
+	}
+	return n;
 }
 
 struct Profile
@@ -197,6 +327,8 @@ inline bool load_profile(const std::wstring &path, Profile &p)
 struct Snap
 {
 	int32_t move_id, move_timer, attack_type, recovery, simple, stun, startup, hit, hp, rage_fx, char_id;
+	int32_t damage_taken; // +0x360 damage of the last hit taken (combo routes: did the hit land)
+	int32_t cancel_window; // +0x788; bit 0x1000000 = the frame they can act again (end of the move)
 	int32_t startup_end; // last active frame (ring only)
 	int32_t throw_tech;  // +0x450, low byte: 0x1D idle; grabbed by a throw: 0x1C break 1, 0x1E break 1+2, 0x1F break 2
 	float px, py, pz;    // +0x1610.. continuous root position (wall awareness)
@@ -218,7 +350,8 @@ inline Snap snap(uintptr_t obj, uintptr_t ring_pl)
 		t7::rd(obj + 0x3D8, s.hit) && t7::rd(obj + 0x1450, s.distance) &&
 		t7::rd(obj + 0x1508, s.hp) && t7::rd(obj + 0x8E0, s.rage_fx) && t7::rd(obj + 0xDC, s.char_id) &&
 		t7::rd(obj + 0x450, s.throw_tech) && t7::rd(obj + 0x1610, s.px) && t7::rd(obj + 0x1614, s.py) &&
-		t7::rd(obj + 0x1618, s.pz) && t7::rd(obj + 0x123C, s.side);
+		t7::rd(obj + 0x1618, s.pz) && t7::rd(obj + 0x123C, s.side) && t7::rd(obj + 0x360, s.damage_taken) &&
+		t7::rd(obj + 0x788, s.cancel_window);
 	s.attack_type = at;
 	s.startup = s.startup_end = 0;
 	if (ring_pl)
@@ -252,7 +385,14 @@ struct Settings
 	int reaction_frames = 14;   // perception delay for the opponent's actions
 	int input_read_chance = 0;  // % per opponent move: perceived instantly instead of after the delay
 	bool punish = true;         // always punish when a punisher from the profile fits the window
-	bool combos = true;         // continue juggles with the profile's combo chunks
+	// Punishment Proficiency (2026-10-19): % of punish openings where the Ghost plays the author's punish
+	// for that window (punishes_<char>.txt) on its first possible frame; 0 = the player's own punishers only
+	int punish_skill = 50;
+	// combos (2026-10-19): 0 = the player's own combo habits (the profile's juggle chunks); 1 = the
+	// author's recorded routes, ended early when a hit doesn't connect or a wall is close (unwanted wall
+	// splat) - then the player's own habits take over; 2 = the routes, always played to the end.
+	// Launchers without a route always use the player's own habits.
+	int combo_style = 1;
 	int guard_skill = 100;      // % of perceived attacks guarded correctly (rest: player's own habits)
 	int decision_skill = 60;    // 0-100: favour the player's attacks that landed over ones that whiffed/got hit
 	int adapt = 70;             // 0-100: how strongly the AI adapts to the human's habits learned in play
@@ -279,6 +419,8 @@ public:
 	std::unordered_map<int, Profile> profiles; // by character id
 	FrameData framedata;                       // every character's moves, learned from replays
 	walls::Map wallmap;                        // per-stage wall maps (walls.txt)
+	Routes routes;                             // the author's combo routes (combos/routes_<char>.txt)
+	Routes punishes;                           // the author's punishes (combos/punishes_<char>.txt)
 	// wall awareness status (shown in the settings panel)
 	enum WallState { kWsOff, kWsNoWalls, kWsCalm, kWsBack, kWsCornered, kWsPress };
 	struct WallInfo { int state = kWsOff; float my_back = -1, opp_back = -1; int my_type = 0, opp_type = 0; const char *level = ""; } wall_info;
@@ -316,6 +458,8 @@ public:
 		last_wall_move_ = -1000, ws_pending_ = ws_logged_ = -1;
 		prev_my_cls_ = prev_opp_cls_ = Cls::free, my_free_since_ = opp_free_since_ = 0, adv_ = 0;
 		model_ = nullptr, model_char_ = -1, win_open_ = false, human_down_ = false, last_human_move_ = -1;
+		perfect_roll_ = 0, perfect_move_ = -1, block_stun_ = false, last_atk_key_ = 0, last_atk_level_ = 0;
+		route_ = nullptr, route_ocls_ = Cls::free, route_hp_ = 100, route_dt_ = 0, last_ch_frame_ = -1000, launch_frame_ = -1000, route_tried_ = -1;
 	}
 
 	bool has_profile(int char_id) const { return profiles.count(char_id) != 0; }
@@ -360,6 +504,15 @@ public:
 		if (opp.move_id != age_move_)
 			age_move_ = opp.move_id, age_t0_ = frame_;
 		opp.age = int(frame_ - age_t0_);
+		// a move that directly follows one of their attacks is still its recovery even without a hit level
+		// (Leo's df+2+3 slides back in 1790 after a block: it looked "free" = no punish window)
+		if (opp.move_id != chain_prev_)
+		{
+			chain_move_ = chain_atk_ && opp.attack_type == 0 && opp.move_id != 32769 ? opp.move_id : -1;
+			chain_prev_ = opp.move_id, chain_atk_ = false;
+		}
+		if (opp.attack_type != 0 && opp.move_id != chain_move_)
+			chain_atk_ = true;
 		dbg = {};
 		check_execution(me.move_id);
 		{
@@ -471,6 +624,13 @@ public:
 			(mc == Cls::stun || mc == Cls::juggled))
 			stop("interrupted");
 
+		// frames since our current move began (its move_timer can continue from the move before: Jin's
+		// d+3+4 second kick 1697 starts at timer 16 - routes then ran 15 frames early)
+		if (me.move_id != my_move_)
+			my_move_ = me.move_id, my_move_t0_ = frame_;
+		my_age_ = int(frame_ - my_move_t0_);
+		route_tick(me, opp);
+
 		const int sit = situation(me, seen);
 		dbg.sit = sit, dbg.seen_move = seen.move_id, dbg.seen_atk = seen.attack_type, dbg.opp_move = opp.move_id;
 		dbg.opp_atk = opp.attack_type, dbg.my_move = me.move_id, dbg.cls = int(mc), dbg.hp = me.hp, dbg.opp_hp = opp.hp;
@@ -487,17 +647,42 @@ public:
 		// stun, and afterwards for as long as the opponent's attack is still in startup/active
 		// (non-natural string follow-ups get blocked). Crouch only for a perceived low. Released the
 		// moment the opponent is recovering (punish/choose takes over).
-		const uint32_t guard_dir = cls(seen) == Cls::attack && read_guard_low(seen) ? (D | B) : B;
-		const bool blocking = mc == Cls::stun && (me.hit == 1 || me.hit == 2);
+		uint32_t guard_dir = cls(seen) == Cls::attack && read_guard_low(seen) ? (D | B) : B;
+		// blockstun: our hit outcome says block (1/2); it can reset mid-stun when their move rolls into a
+		// follow-up (Leo's df+2+3 slide), so a stun that began as a block stays one until it ends
+		const bool block_start = mc == Cls::stun && (me.hit == 1 || me.hit == 2) && !block_stun_;
+		block_stun_ = mc == Cls::stun && (me.hit == 1 || me.hit == 2 || (block_stun_ && me.hit == 0)); // a hit ends it
+		if (block_start)
+			perfect_move_ = -1; // a new opening: a new Punishment Proficiency roll
+		const bool blocking = block_stun_;
 		const int my_rem = mc == Cls::stun ? std::max(0, me.recovery - me.move_timer) : 0;
-		if (blocking && opp.attack_type != 0)
+		// the move we are blocking: their last attacking move. Our block registers a frame late, and by
+		// then a move that rolls into a follow-up (Leo's df+2+3 -> slide) has no hit level any more: the
+		// opening was never noted, so nothing punished it in blockstun
+		if (opp.attack_type != 0)
+			last_atk_key_ = move_key(opp.char_id, opp.move_id), last_atk_level_ = opp.attack_type;
+		if (blocking && (opp.attack_type != 0 || block_start) && last_atk_key_)
 		{
-			blocked_key_ = move_key(opp.char_id, opp.move_id); // the move we are blocking
-			blocked_level_ = opp.attack_type;
+			blocked_key_ = last_atk_key_;
+			blocked_level_ = last_atk_level_;
 			blocked_pending_ = true;
 		}
+		// a blocked low: stay crouched through the blockstun (standing up turned crouch punishes into
+		// standing ones, and a standing punish pressed from the crouch came out as ws2)
+		if (blocking && blocked_level_ == 1)
+			guard_dir = D | B;
 		// Buffered punish: press on the last blockstun frame, like a player buffering the input, so the
 		// move comes out on our first free frame.
+		if (blocking && !punish_buffered_ && blocked_pending_ && perfect_punish(me, opp, my_rem, true))
+			punish_buffered_ = true;
+		// trace: on our last blockstun frame, what the perfect punish check saw (when it did not play)
+		if (blocking && my_rem == 0 && !punish_buffered_ && blocked_pending_ && pdiag_.why[0])
+		{
+			snprintf(pdiag_note_, sizeof pdiag_note_, "punish check: their %d (chain %d) rem %d%s, window %d, %s, dist %d -> %s",
+				pdiag_.move, pdiag_.chain, pdiag_.rem, pdiag_.rec ? "" : " (not recovering)", pdiag_.window,
+				pdiag_.low ? "low" : "standing", pdiag_.dist, pdiag_.why);
+			last_event = pdiag_note_, dbg.decided = true;
+		}
 		if (blocking && my_rem <= 1 && !punish_buffered_ && cfg.punish && blocked_pending_)
 		{
 			bool known = true;
@@ -532,7 +717,7 @@ public:
 		if (measuring_)
 		{
 			const Cls oc = cls(opp);
-			if (oc == Cls::free)
+			if (oc == Cls::free && !recovering(opp))
 			{
 				const int frames = int(frame_ - meas_t0_);
 				if (frames <= 60)
@@ -557,7 +742,13 @@ public:
 			choose(prof, me, opp, seen, sit);
 
 		uint32_t out = 0;
-		if (guarding_string)
+		if (guarding_string && playing_kind_ == kPunish && !playing_.empty())
+		{
+			out = playing_[pos_++];
+			if (pos_ >= playing_.size())
+				stop("done");
+		}
+		else if (guarding_string)
 		{
 			out = guard_dir;
 			if (string_guard_ && mc == Cls::free)
@@ -1029,7 +1220,7 @@ private:
 			return -it->second.block_adv;
 		if (known)
 			*known = false;
-		return cls(opp) == Cls::free ? 0 : std::max(0, remaining(opp) - my_rem);
+		return !recovering(opp) ? 0 : std::max(0, remaining(opp) - my_rem);
 	}
 
 	// The ring's startup fields lag behind a new move (on its first frame they still hold the previous
@@ -1072,6 +1263,262 @@ private:
 		case Cls::down: return kOppDown;
 		default: return kSitNeutral;
 		}
+	}
+
+	// ---- recovery that continues in a follow-up move (see step)
+	int32_t chain_prev_ = -1, chain_move_ = -1;
+	bool block_stun_ = false;
+	uint32_t last_atk_key_ = 0;
+	int last_atk_level_ = 0;
+	bool chain_atk_ = false;
+	bool recovering(const Snap &s) const
+	{
+		if (s.cancel_window & 0x1000000)
+			return false; // the game says they can act this frame
+		return cls(s) == Cls::attack || (s.move_id == chain_move_ && cls(s) == Cls::free && remaining(s) > 0);
+	}
+
+	// ---- perfect punishes (Punishment Proficiency)
+	static constexpr int kPunish = 5;          // playing_kind_ of an author's punish
+	int perfect_roll_ = 0;                     // this opening's roll: 1 = perfect, 0 = player's own (or used)
+	int32_t perfect_move_ = -1;                // the move of theirs it was rolled for
+	char punish_note_[200] = "";
+	struct PDiag { bool blocking = false, rec = false, low = false; int my_rem = 0, dist = 0, move = 0, chain = 0, rem = 0, window = -1; const char *why = ""; } pdiag_;
+	char pdiag_note_[240] = "";
+
+	// the punisher reaches them from here: the farthest distance it was STARTED from and still connected
+	// (frame data from the replays, or the author's own attempts); punishers travel, so the connect
+	// distance (range) is far shorter (Jin's ws4: started ~1700 apart, connected at ~1190). Unknown =
+	// assume it reaches.
+	bool reaches(const Route &r, const Snap &me) const
+	{
+		if (r.reach < 0)
+			return me.distance <= -r.reach; // strict (punish_keep.txt): only as close as the author did it
+		auto it = framedata.find(move_key(me.char_id, r.launcher));
+		const int fd = it != framedata.end() ? it->second.start_range : 0;
+		// the author's practice distance is where it was done, not its limit: more margin for it alone
+		const int start = std::max(r.reach + 350, fd > 0 ? fd + 150 : 0);
+		return r.reach <= 0 && fd <= 0 ? true : me.distance <= start;
+	}
+
+	// blocking: during our blockstun (my_rem frames left); else a whiff/known window we can act on now
+	bool perfect_punish(const Snap &me, const Snap &opp, int my_rem, bool blocking, int window = -1)
+	{
+		pdiag_ = {};
+		pdiag_.blocking = blocking, pdiag_.my_rem = my_rem, pdiag_.dist = int(me.distance);
+		pdiag_.move = opp.move_id, pdiag_.chain = chain_move_, pdiag_.rem = remaining(opp), pdiag_.rec = recovering(opp);
+		if (cfg.punish_skill <= 0)
+			return pdiag_.why = "proficiency 0", false;
+		const auto it = punishes.find(me.char_id);
+		if (it == punishes.end())
+			return pdiag_.why = "no punishes for this character", false;
+		// one roll per opening: per move of theirs (between two attempts they return to idle)
+		if (opp.move_id != perfect_move_)
+			perfect_move_ = opp.move_id, perfect_roll_ = int(rng_() % 100) < cfg.punish_skill;
+		if (!perfect_roll_)
+			return pdiag_.why = "roll: player's own", false;
+		const bool crouching = me.simple == 5 || me.simple == 6 || me.simple == 7;
+		// a low we just blocked counts as low even on our first free frame (we may be standing up already)
+		const bool low = blocking ? (blocked_level_ == 1 || crouching) : (crouching || (known_window_ > 0 && blocked_level_ == 1));
+		pdiag_.low = low;
+		// mid-string: their next hit is still coming (a blocked first hit; the string's last hit is the opening)
+		if (cls(opp) == Cls::attack && opp.move_timer <= active_end(opp))
+			return pdiag_.why = "their next hit is coming", false;
+		if (window < 0)
+		{
+			// frames we will have once free: on our last blockstun frame (my_rem 0) their remaining
+			// recovery is the window (calibrated on the punish lab: a -10 move reads 10 there)
+			if (recovering(opp) && (move_key(opp.char_id, opp.move_id) == blocked_key_ || opp.move_id == chain_move_))
+				window = remaining(opp) - my_rem;
+			else
+				window = punish_window(blocked_key_, opp, my_rem);
+		}
+		// the author's punishes for this opening: the biggest window class that fits
+		const Route *pick = nullptr;
+		std::vector<const Route *> c;
+		for (int pass = 0; pass < 2 && c.empty(); ++pass)
+		{
+			int best = -1;
+			for (const auto &r : it->second)
+			{
+				const bool kind_ok = pass == 0 ? (low ? (blocking ? r.opening == Route::kLowBlock : r.opening == Route::kWhiff)
+				                                      : r.opening == Route::kBlock)
+				                               : (low ? r.opening != Route::kBlock : r.opening == Route::kBlock);
+				if (kind_ok && r.window <= window && r.window > best && reaches(r, me))
+					best = r.window;
+			}
+			for (const auto &r : it->second)
+			{
+				const bool kind_ok = pass == 0 ? (low ? (blocking ? r.opening == Route::kLowBlock : r.opening == Route::kWhiff)
+				                                      : r.opening == Route::kBlock)
+				                               : (low ? r.opening != Route::kBlock : r.opening == Route::kBlock);
+				if (kind_ok && r.window == best && reaches(r, me))
+					c.push_back(&r);
+			}
+		}
+		pdiag_.window = window;
+		if (c.empty())
+			return pdiag_.why = "no recorded punish fits / reaches", false;
+		// same window: a launch punish first (Kazumi's uf+4 over 3,2 when it reaches)
+		if (std::any_of(c.begin(), c.end(), [](const Route *r) { return r->launches; }))
+			c.erase(std::remove_if(c.begin(), c.end(), [](const Route *r) { return !r->launches; }), c.end());
+		pick = c[rng_() % c.size()];
+		// timing: the first press lands on our last blockstun frame (blocking), or now (a whiff); the
+		// frames before it hold the motion / stance the press needs
+		// timed like the author: their first free frame on ours. What they input in blockstun (a buffered
+		// press) is input in ours; what they input after it (EWGF's f,n,d,df) after ours - played inside
+		// blockstun a motion is eaten and only the last input counts (EWGF came out as df+2). On our last
+		// blockstun frame my_rem is 0, so the first free frame is my_rem + 1 frames away.
+		const int open = pick->open >= 0 ? pick->open : pick->press;
+		size_t from;
+		if (blocking)
+		{
+			if (my_rem + 1 > open)
+				return pdiag_.why = "waiting", false;
+			from = size_t(open - 1 - my_rem);
+		}
+		else
+			from = size_t(std::max(0, std::min(open, pick->press - 2)));
+		playing_.assign(pick->inputs.begin() + from, pick->inputs.end());
+		pos_ = 0;
+		playing_kind_ = kPunish;
+		interruptible_ = false;
+		dbg.decided = true;
+		perfect_roll_ = 0; // used
+		pdiag_.why = "played";
+		static const char *on[] = { "", "low ", "whiff " };
+		snprintf(punish_note_, sizeof punish_note_, "perfect punish: %s-%d %s (%d dmg)", on[pick->opening], pick->window,
+			pick->notation.c_str(), pick->damage);
+		last_event = punish_note_;
+		return true;
+	}
+
+	// ---- combo routes
+	static constexpr int kRoute = 4;           // playing_kind_ of a route (not a profile chunk kind)
+	static constexpr int kHitSlack = 10;       // a route's hit may land this many frames off its recording
+	static constexpr float kWallRoom = 1500;   // keep the opponent this far from the wall (no splat)
+	const Route *route_ = nullptr;
+	size_t route_hit_ = 0;                     // next expected hit
+	int route_cut_ = -1;                       // style 1, wall close: end the route at this frame
+	Cls route_ocls_ = Cls::free;
+	int32_t route_hp_ = 100, route_dt_ = 0;
+	int64_t last_ch_frame_ = -1000, launch_frame_ = -1000;
+	int32_t route_tried_ = -1; // our move a route was last looked up for (once per move)
+	int32_t my_move_ = -1;
+	int64_t my_move_t0_ = 0;
+	int my_age_ = 0;
+	char route_note_[200] = "";
+
+	void route_tick(const Snap &me, const Snap &opp)
+	{
+		const Cls oc = cls(opp);
+		if (oc == Cls::juggled && route_ocls_ != Cls::juggled)
+			launch_frame_ = frame_, route_tried_ = -1;
+		route_ocls_ = oc;
+		const bool hit = opp.hp < route_hp_ || (opp.damage_taken != route_dt_ && opp.damage_taken > 0);
+		route_hp_ = opp.hp, route_dt_ = opp.damage_taken;
+		if (opp.hit == 10 || opp.hit == 11)
+			last_ch_frame_ = frame_;
+		if (route_)
+		{
+			if (playing_kind_ != kRoute || playing_.empty())
+			{
+				route_ = nullptr; // finished or stopped (we got hit)
+				return;
+			}
+			const int t = int(pos_) - route_->lead; // frame of the route (from the launcher's start)
+			const auto &hs = route_->hits;
+			if (hit)
+				while (route_hit_ < hs.size() && hs[route_hit_].first <= t + kHitSlack)
+					++route_hit_;
+			if (cfg.combo_style != 1)
+				return;
+			const char *why = nullptr;
+			if (route_hit_ < hs.size() && t > hs[route_hit_].first + kHitSlack)
+				why = "combo route: a hit missed, own habits take over";
+			else if (oc == Cls::free)
+				why = "combo route: opponent recovered";
+			else if (route_cut_ >= 0 && t >= route_cut_)
+				why = "combo route: wall close, ended early";
+			if (why)
+				stop(why), dbg.decided = true, route_ = nullptr;
+			return;
+		}
+		// a route starts when our move is its launcher, up to 20 frames into the juggle: a two-part launcher
+		// (Jin's d+3+4 = 1695 then 1697) can lift them while its first part is still out
+		if (cfg.combo_style == 0 || oc != Cls::juggled || frame_ - launch_frame_ > 20 || me.move_id == route_tried_)
+			return;
+		route_tried_ = me.move_id;
+		const auto it = routes.find(me.char_id);
+		if (it == routes.end())
+			return;
+		// routes for the move that launched them; a counter hit prefers the counter-hit routes
+		const bool ch = frame_ - last_ch_frame_ <= 30;
+		std::vector<const Route *> c;
+		for (int pass = 0; pass < 2 && c.empty(); ++pass)
+			for (const auto &r : it->second)
+				if (r.launcher == me.move_id && (pass == 1 || (r.starter == Route::kCounter) == ch || r.starter == Route::kParry))
+					c.push_back(&r);
+		if (c.empty())
+			return;
+		// where we are in the route: our current move's frame
+		const Route *r0 = c.front();
+		int at = 0;
+		for (const auto &[mv, a] : r0->moves)
+			if (mv == me.move_id) { at = a; break; }
+		const int t = at + my_age_;
+		// style 1 at a wall: prefer a route that keeps them off the wall; else end before it would splat
+		float room = -1;
+		if (cfg.combo_style == 1 && wall_info.opp_back > 0)
+			room = wall_info.opp_back - kWallRoom;
+		auto carry_after = [&](const Route &r) {
+			float base = 0, end = 0;
+			for (const auto &[f, w] : r.hits) { if (f <= t) base = w; end = w; }
+			return end - base;
+		};
+		if (room >= 0)
+		{
+			std::vector<const Route *> fit;
+			for (const Route *r : c)
+				if (carry_after(*r) <= room)
+					fit.push_back(r);
+			if (!fit.empty())
+				c = fit;
+		}
+		const Route *r = c[rng_() % c.size()];
+		// the chosen route's own frame for our move (routes of one launcher share it closely)
+		at = 0;
+		for (const auto &[mv, a] : r->moves)
+			if (mv == me.move_id) { at = a; break; }
+		const int rt = at + my_age_;
+		const size_t start = size_t(r->lead + rt);
+		if (start >= r->inputs.size())
+			return;
+		route_cut_ = -1;
+		if (room >= 0 && carry_after(*r) > room)
+		{
+			float base = 0;
+			for (const auto &[f, w] : r->hits) if (f <= rt) base = w;
+			int last_ok = rt;
+			for (const auto &[f, w] : r->hits)
+				if (f > rt && w - base <= room)
+					last_ok = f;
+			route_cut_ = last_ok + 8; // let that hit land, then the player's own habits (wall combos)
+		}
+		route_hit_ = 0;
+		while (route_hit_ < r->hits.size() && r->hits[route_hit_].first <= rt)
+			++route_hit_;
+		playing_.assign(r->inputs.begin() + start, r->inputs.end());
+		// pos_ counts from the route's first input frame (route_tick reads the route frame from it)
+		playing_.insert(playing_.begin(), start, 0u);
+		pos_ = start;
+		playing_kind_ = kRoute;
+		interruptible_ = false;
+		route_ = r;
+		static const char *sn[] = { "", "CH ", "low parry " };
+		snprintf(route_note_, sizeof route_note_, "combo route: %s%s (%d dmg)%s", sn[r->starter], r->notation.c_str(),
+			r->damage, route_cut_ >= 0 ? " - wall close, ends early" : "");
+		last_event = route_note_, dbg.decided = true;
 	}
 
 	void stop(const char *why)
@@ -1336,8 +1783,10 @@ private:
 		{
 			const bool crouching = me.simple == 5 || me.simple == 6 || me.simple == 7;
 			int window = known_window_;
-			if (cls(opp) == Cls::attack && opp.move_timer > active_end(opp))
+			if ((cls(opp) == Cls::attack && opp.move_timer > active_end(opp)) || (opp.move_id == chain_move_ && recovering(opp)))
 				window = std::max(window, remaining(opp));
+			if (window >= 10 && perfect_punish(me, opp, 0, false, window))
+				return;
 			if (cfg.punish && window >= 10 && try_punish(p, me, window, crouching, known_window_ ? "punish (known)" : "punish"))
 				return;
 			// a whiff that ended out of reach: dash in (f,n,f with the players' usual timing) when a
@@ -1399,7 +1848,7 @@ private:
 		}
 
 		// 2. keep juggles going
-		if (cfg.combos && sit == kOppJuggled)
+		if (sit == kOppJuggled)
 		{
 			if (auto c = sample(p, [&](const Chunk &c) { return c.kind == kAttack && c.sit == kOppJuggled && usable(c); }, true))
 				return play(c->inputs, false, "combo");

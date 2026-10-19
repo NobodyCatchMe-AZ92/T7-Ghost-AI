@@ -4,6 +4,7 @@
 // Replays are recorded automatically while game mode = replay -> t7ghost/replays/rep_<time>.jsonl
 // Hotkeys (only while the game window is focused):
 //   Ctrl+F6  start/stop manual recorder -> t7ghost/rec_<time>.jsonl
+//   Ctrl+F12 start/stop combo recording (Practice demonstrations) -> t7ghost/combos/combo_<time>.jsonl
 //   Ctrl+F7  settings tracer start/stop -> t7ghost/trace_<time>.log
 //   Ctrl+F8  settings tracer marker
 //   Ctrl+F9  reload t7ghost.ini [ai] settings and profiles/
@@ -42,7 +43,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 
 namespace {
 
-#define T7_VERSION_STR "0.7.2" // keep in step with the t7ghost.ini header (tools/write_ini.py)
+#define T7_VERSION_STR "0.8.5" // keep in step with the t7ghost.ini header (tools/write_ini.py)
 constexpr const char *kModVersion = T7_VERSION_STR;
 std::wstring g_dir; // .../Win64/t7ghost/
 FILE *g_log = nullptr;
@@ -110,7 +111,19 @@ struct Recorder
 	}
 
 	bool automatic = false;
+	bool combo = false; // combo lab recording (no name probe; analysis/combos.py reads it)
 	int32_t chars[2] = { -1, -1 };
+
+	// Combo lab (2026-10-19): the author demonstrates combo routes in Practice; analysis/combos.py turns the
+	// recording into a list of combos (starter, launcher, follow-ups, timing, damage, notation)
+	void toggle_combo()
+	{
+		if (f)
+			return toggle();
+		CreateDirectoryW((g_dir + L"combos").c_str(), nullptr);
+		open(stamp_name(L"combos/combo_", L".jsonl"), false);
+		combo = f != nullptr;
+	}
 
 	// Records every replay that plays: starts when game mode becomes "replay", stops when it leaves,
 	// and starts a new file when the character pair changes (next replay loaded directly).
@@ -143,6 +156,7 @@ struct Recorder
 			fclose(f);
 			f = nullptr;
 			automatic = false;
+			combo = false;
 			logf("recorder: stopped, %llu frames", frames);
 			g_finder.report([](const char *fmt, auto... a) { logf(fmt, a...); });
 			return;
@@ -150,16 +164,19 @@ struct Recorder
 		open(stamp_name(L"rec_", L".jsonl"));
 	}
 
-	void open(const std::wstring &path)
+	void open(const std::wstring &path, bool probe = true)
 	{
 		f = _wfsopen(path.c_str(), L"wb", _SH_DENYWR); // readable while the game runs
 		if (!f)
 			return;
 		last_fc = 0;
 		frames = 0;
-		probed_late = false;
+		probed_late = !probe; // combo recordings never store name codes
 		logf("recorder: started %ls", path.c_str());
-		write_probe("open");
+		if (probe)
+			write_probe("open");
+		else
+			fprintf(f, "{\"combo_lab\":1,\"stage\":%d,\"mode\":%d}\n", t7::read_global(t7::kStageId), t7::read_global(t7::kGameMode));
 	}
 
 	void write_frame(uintptr_t blk, uint32_t fc)
@@ -225,6 +242,7 @@ struct Recorder
 		}
 	}
 } g_rec;
+std::atomic<bool> g_combo_toggle{ false }; // combo recording on/off asked from the F1 panel (done by the worker)
 
 // ---------------------------------------------------------------- settings tracer
 // Ctrl+F7 start/stop, Ctrl+F8 numbered marker. Every 100 ms diffs the exe's .data section and
@@ -466,8 +484,10 @@ ghost::Brain *load_brain()
 	b->cfg.enabled = geti(L"ai", L"mod_enabled", geti(L"ai", L"enabled", 1)) != 0;
 	b->cfg.reaction_frames = std::clamp(geti(L"ai", L"reaction_frames", 14), 0, 60);
 	b->cfg.input_read_chance = std::clamp(geti(L"ai", L"input_read_chance", 0), 0, 100);
-	b->cfg.punish = geti(L"ai", L"punish", 1) != 0;
-	b->cfg.combos = geti(L"ai", L"combos", 1) != 0;
+	b->cfg.punish = true; // the old on/off switch: now Punishment Proficiency (0 = the player's own punishers)
+	b->cfg.punish_skill = std::clamp(geti(L"ai", L"punish_proficiency", 50), 0, 100);
+	// combo_style 0/1/2 (2026-10-19); an older ini's combos=0 meant no juggle follow-ups: own habits then
+	b->cfg.combo_style = std::clamp(geti(L"ai", L"combo_style", geti(L"ai", L"combos", 1) ? 1 : 0), 0, 2);
 	b->cfg.guard_skill = std::clamp(geti(L"ai", L"guard_skill", 100), 0, 100);
 	b->cfg.decision_skill = std::clamp(geti(L"ai", L"decision_skill", 60), 0, 100);
 	b->cfg.adapt = std::clamp(geti(L"ai", L"adapt", 70), 0, 100);
@@ -582,12 +602,34 @@ ghost::Brain *load_brain()
 		logf("brain: wall maps for %zu stages (wall awareness %s)", b->wallmap.stages.size(), b->cfg.wall_awareness ? "on" : "off");
 	else
 		logf("brain: no walls.txt (wall awareness has no maps)");
+	{
+		int n = 0;
+		WIN32_FIND_DATAW fd;
+		if (HANDLE h = FindFirstFileW((g_dir + L"combos\\routes_*.txt").c_str(), &fd); h != INVALID_HANDLE_VALUE)
+		{
+			do
+				n += ghost::load_routes(g_dir + L"combos\\" + fd.cFileName, b->routes);
+			while (FindNextFileW(h, &fd));
+			FindClose(h);
+		}
+		logf("brain: %d combo routes for %zu characters (combo style %d)", n, b->routes.size(), b->cfg.combo_style);
+		n = 0;
+		if (HANDLE h = FindFirstFileW((g_dir + L"combos\\punishes_*.txt").c_str(), &fd); h != INVALID_HANDLE_VALUE)
+		{
+			do
+				if (!wcsstr(fd.cFileName, L"_candidates"))
+					n += ghost::load_punishes(g_dir + L"combos\\" + fd.cFileName, b->punishes);
+			while (FindNextFileW(h, &fd));
+			FindClose(h);
+		}
+		logf("brain: %d punishes for %zu characters (punishment proficiency %d%%)", n, b->punishes.size(), b->cfg.punish_skill);
+	}
 	if (ghost::load_framedata(g_dir + L"framedata.txt", b->framedata))
 		logf("brain: frame data for %zu moves", b->framedata.size());
 	else
 		logf("brain: no framedata.txt (punishing uses live recovery only)");
-	logf("brain: enabled=%d reaction=%d read_chance=%d%% punish=%d combos=%d guard_skill=%d decision_skill=%d adapt=%d throw_break=%d, %zu characters",
-		b->cfg.enabled, b->cfg.reaction_frames, b->cfg.input_read_chance, b->cfg.punish, b->cfg.combos, b->cfg.guard_skill, b->cfg.decision_skill, b->cfg.adapt, b->cfg.throw_break, b->profiles.size());
+	logf("brain: enabled=%d reaction=%d read_chance=%d%% punish=%d combo_style=%d guard_skill=%d decision_skill=%d adapt=%d throw_break=%d, %zu characters",
+		b->cfg.enabled, b->cfg.reaction_frames, b->cfg.input_read_chance, b->cfg.punish, b->cfg.combo_style, b->cfg.guard_skill, b->cfg.decision_skill, b->cfg.adapt, b->cfg.throw_break, b->profiles.size());
 	return b;
 }
 
@@ -941,6 +983,7 @@ DWORD WINAPI worker(void *)
 	for (;;)
 	{
 		if (hotkey(VK_F6)) g_rec.toggle();
+		if (hotkey(VK_F12) || g_combo_toggle.exchange(false)) g_rec.toggle_combo();
 		if (hotkey(VK_F5)) dump_players();
 		if (hotkey(VK_F4)) gbt::in_background([] { gbt::report(); });
 		if (hotkey(VK_F3)) gbt::in_background([] { gbt::rename(); });

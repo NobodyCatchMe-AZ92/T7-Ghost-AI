@@ -1,4 +1,4 @@
-"""Write t7ghost.ini in the release layout: version header, then each
+"""Write t7ghost.ini in the release layout (the author's sample): version header, then each
 option followed by its explanation, two blank lines between options.
 
   py -I tools/write_ini.py OUT.ini [--from EXISTING.ini]
@@ -9,7 +9,7 @@ defaults below are written (release template).
 import configparser
 import sys
 
-VERSION = "0.7.2"  # keep in step with T7_VERSION_STR in src/main.cpp
+VERSION = "0.8.5"  # keep in step with T7_VERSION_STR in src/main.cpp
 DOWNLOAD = ". . . "  # pending: the download link for updates
 
 # (key, default, explanation)
@@ -19,8 +19,10 @@ AI = [
     ("treasure_battle", "1", "1 = also in Treasure Battle (characters without a profile keep the game's CPU)"),
     ("reaction_frames", "14", "frames before the AI reacts to what you do (60 = 1 second). 13-15 = strong human"),
     ("input_read_chance", "0", '0-100: chance per move that the AI "reads" your move instantly (cheat). 0 = fair'),
-    ("punish", "1", "1 = always punish when a punisher the player used fits the window"),
-    ("combos", "1", "1 = continue juggles with the player's own combos"),
+    ("punish_proficiency", "50", "0-100: Punishment Proficiency. 0 = the player's own punishers and timing; 1-100 = chance that a punish "
+                                "is perfect (the best punish for that opening, on the first possible frame)"),
+    ("combo_style", "1", "0 = the player's own combo habits, 1 = finish combos when appropriate (recorded routes, "
+                         "ended early when a hit misses or a wall is close), 2 = always finish combos"),
     ("guard_skill", "100", "0-100: how often perceived attacks are guarded correctly (scaled by the player's guard habit)"),
     ("decision_skill", "60", "0-100: How much the Ghosts favour attacks that are statistically proven to land more often than ones that whiffed or got counter-hit."),
     ("adapt", "70", "0-100: how strongly the AI adapts to YOUR habits learned during play (kept per character you use)"),

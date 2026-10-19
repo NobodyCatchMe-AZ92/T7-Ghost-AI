@@ -1,0 +1,16 @@
+# Punishes the author asked to keep although done fewer than 3 times, or (leading '-') to drop.
+# character  kind  window class  hitting moves (comma separated)   # why
+Kazuya low_block 11 1638,1663   # 4,4 on -11 lows, recorded once (2026-10-19)
+Kazuya low_block 16 1633        # ws2 launch on -15 lows (16 f startup), recorded once (2026-10-19)
+-Kazuya block 15 1713           # wind god fist (d, df, then 2 a frame late); 1712 is EWGF (d, then df+2 on one frame)
+-Kazuya block 15 1658           # EWGF attempts that came out as another move
+-Kazuya block 14 1658           # the same, at -12/-13 (late; its startup is 14 f)
+-DevilJin block 15 1722        # wind god fist (d, df, then 2 a frame late); 1721 is EWGF (author: the last attempt is right)
+Feng block 15 1551 strict       # uf+4: very short, strict range - only from as close as the author did it (2026-10-19)
+Dragunov low_block 11 1749      # ws4: his -11 low punish (recorded once) (2026-10-19)
+-Dragunov low_block 12 1738,1739        # ws1,2 (12 f): discarded by the author; ws4 is his -11 low punish
+-Jin low_block 15 1747,1837        # ws2 combo warm-ups (author: only the last three ws2 combos are right)
+Kazumi block 15 1522 strict       # uf+4: very short reach; otherwise 3,2 (2026-10-19)
+Kazumi low_block 15 1522 strict   # uf+4 after a low: very short reach; otherwise ws1,2
+Miguel block 15 1588 strict       # uf+4: short reach; otherwise f+1+2 (14); -16+ df+2,1 (2026-10-19)
+Miguel low_block 15 1588 strict   # uf+4 after a low: short reach; otherwise ws2,4

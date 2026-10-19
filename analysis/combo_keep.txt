@@ -1,0 +1,8 @@
+# Routes the author asked to keep although they were done fewer than 3 times (analysis/combos.py).
+# character  launcher  hitting moves (the route's identity, comma separated)   # why
+Claudio 220 1747,1713,1545,1658,1660,1740   # low parry, done twice the same way (2026-10-19)
+Katarina 1577 1577,1578,1580,1686,1662,1689,1696   # CH 4, done twice the same way (2026-10-19)
+Miguel 1588 1588,1744,1456,1714,1715,1757,1769,1654,1669   # uf+4, done twice (2026-10-19)
+Miguel 1785 1785,1686   # CH db+4, d+3+4, done twice (2026-10-19)
+Miguel 1686 1686,1678   # CH d+3+4, f+2+3, done twice (2026-10-19)
+Jin 1747 1747,1618,1619,1771,1772,1800,1807,1590,1591 latest   # ws2 combo: the last three attempts are the right ones (2026-10-19)

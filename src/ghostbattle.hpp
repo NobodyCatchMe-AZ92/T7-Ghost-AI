@@ -111,7 +111,7 @@ std::map<int, std::vector<uintptr_t>> ghosts_by_char(ghost::Brain *b)
 	return by_char;
 }
 
-// a ranked ghost from the game's list whose character has a Ghost profile, or 0. Rank-agnostic (confirmed in play):
+// a ranked ghost from the game's list whose character has a Ghost profile, or 0. Rank-agnostic (the author's choice):
 // a character first, equally likely among those in the list, then one of its ghosts from any rank tier.
 uintptr_t ghost_record(ghost::Brain *b)
 {

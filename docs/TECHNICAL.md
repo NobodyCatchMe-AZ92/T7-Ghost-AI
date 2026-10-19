@@ -134,6 +134,33 @@ HUD treasure chests: the clips `_root.HUD_Positioning_mc.TreasureBox_Set_mc...` 
 (show), `0x53CD40` (update) and `0x53C9A0` (end); with "Hide treasure chests" they return without
 playing (the results screen is another movie).
 
+## Combo routes and punishes (`analysis/combos.py`, `analysis/punishes.py`, `src/brain.hpp`)
+
+Demonstrations are recorded in Practice with the dev build (Ctrl+F12, `t7ghost/combos/combo_*.jsonl`, the
+same per-frame format as other recordings). Repeated attempts are grouped and kept when done 3+ times
+(`analysis/combo_keep.txt` / `analysis/punish_keep.txt` add, drop or tune single ones).
+
+Combo routes: a launch is the opponent becoming juggled (simple state 14); the launcher is our move at the
+last damage before it, a low parry is attack -> airborne without damage. A route is identified by the move
+active on each damage frame. `routes_<char>.txt`, one route per line:
+`starter launcher hits damage frames lead | id@frame ... | held:frames,... | frame:carry,... | notation`
+(`held` = player-relative input words, `carry` = how far the opponent has travelled, in wall-map units).
+At runtime a route starts when our move is a route's launcher within 20 frames of the launch, timed from
+when that move began (its move timer can continue from the move before). Combo style 1 ends it when an
+expected hit does not land within 10 frames, when the opponent is free again, or before the hit that would
+carry them into a wall (opponent's back distance - 1500 < remaining carry).
+
+Punishes: an opening is the end of our blockstun (a block that began as one stays one while the hit
+outcome resets in their follow-up move) or a whiff over our crouch. Window = their remaining recovery on
+our last blockstun frame; a move that directly follows one of their attacks counts as its recovery, and
+cancel window bit `0x1000000` (+0x788) marks the frame they can act. `punishes_<char>.txt`:
+`kind needed_window punisher hits damage frames lead press reach open launches | moves | inputs | damage frames | notation`
+(needed window = frames from the first free frame to the hit, startup plus any motion; `reach` = farthest
+start distance, negative = a hard limit; `open` = the input frame of the author's first free frame).
+Punishment Proficiency rolls once per blockstun; on success the punish needing the most frames that fits
+the window and reaches is played (launch punishes first among equals), timed so the author's first free
+frame lands on ours.
+
 ## Harvesters (`src/harvest.cpp`)
 
 The recorder alone, with no hooks: replay variant (records while game mode = 3, optional

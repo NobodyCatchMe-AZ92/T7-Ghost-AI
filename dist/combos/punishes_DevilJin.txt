@@ -1,0 +1,8 @@
+# DevilJin punishes (analysis/punishes.py; kept = done 3+ times, not cut short)
+# kind needed_window punisher hits damage frames lead press reach open launches | moves id@frame(*=hit) | inputs held:frames | damage frames | notation
+char 13
+block 10 1565 3 25 38 10 5 1517 10 1 | 1565@0* 1532@10* 1533@25* | 0:5,16384:3,0:5,16384:3,0:3,16384:4,0:2,32768:4,0:3,32768:4,0:3,32768:4,0:4,32768:1 | 9,24,37 | 1, 1, 2  # P1 x4
+block 13 1638 2 26 29 10 9 1340 10 0 | 1638@0* 1639@14* | 0:7,8:1,10:1,8202:4,10:3,8202:3,8194:1,8192:1,0:18 | 12,28 | df+4, df+4  # P2 x3
+block 15 1721 1 23 11 10 9 1998 6 1 | 1721@0* | 0:2,8:4,0:1,2:2,32778:1,32776:3,32770:1,2:1,0:6 | 10 | df+2  # P3 x3
+low_block 11 1647 2 29 27 10 6 1865 10 0 | 1647@0* 1648@12* | 6:4,4:1,0:1,8192:4,0:5,8192:3,0:19 | 10,26 | 4, 4  # P6 x3
+low_block 15 1645 1 20 15 10 6 1540 10 1 | 1645@0* | 6:1,0:5,32768:5,0:14 | 14 | 2  # P7 x3

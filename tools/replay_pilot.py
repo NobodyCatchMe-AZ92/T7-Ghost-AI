@@ -160,11 +160,11 @@ def keys(seq, hold=0.08, gap=0.35):
     if not hwnd:
         sys.exit("game window not found")
     fg_pid = wt.DWORD()
-    user32.GetWindowThreadProcessId(confirmed in play), ctypes.byref(fg_pid))
+    user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), ctypes.byref(fg_pid))
     if fg_pid.value != pid:
         user32.SetForegroundWindow(hwnd)
         time.sleep(0.5)
-        user32.GetWindowThreadProcessId(confirmed in play), ctypes.byref(fg_pid))
+        user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), ctypes.byref(fg_pid))
         if fg_pid.value != pid:
             sys.exit("game window is not in the foreground; not sending keys")
     for k in seq:
@@ -225,7 +225,7 @@ def game_foreground():
     if not hwnd:
         return False
     fg = wt.DWORD()
-    user32.GetWindowThreadProcessId(confirmed in play), ctypes.byref(fg))
+    user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), ctypes.byref(fg))
     return fg.value == pid
 
 

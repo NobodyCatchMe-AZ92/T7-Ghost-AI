@@ -92,7 +92,7 @@ _SELF = {}  # recordings folder -> {recording stem: own side}
 def self_side(rec):
     """Index (0 = p1, 1 = p2) of the recording player's own side. The slot follows the original
     match side, not the Battle Log card or the playback side, so it comes from self_sides.txt
-    (one line per replay, written by whoever harvested them) next to the replays folder, or inside a
+    (a per-replay character list) next to the replays folder, or inside a
     contributor's folder; P1 if unlisted. One list per recordings folder."""
     d = rec.path.parent
     if d not in _SELF:
@@ -148,7 +148,7 @@ def live_labels(rec):
 
 def placeholder_hashes(recs):
     """Hashes that are the game's stand-in when the opponent's name is unavailable: one hash over
-    many different opponent characters (one such hash covered 8 characters in 10 matches)."""
+    many different opponent characters (one acct-B hash covered 8 characters in 10 matches)."""
     chars = {}
     for r in recs:
         if r.path.name.startswith("live_"):
@@ -184,7 +184,7 @@ def player_ids(rec):
     ids = [None, None]
     # the first folder is the author's own replays ("self" = P01); every other replay folder is a
     # contributor: their recording player is a new player, and their name codes use their own key,
-    # so their ids are kept per folder (2026-10-19, first volunteered data)
+    # so their ids are kept per folder
     own = rec.path.parent.resolve() == _MAIN_DIR
     ids[me] = "self" if own else f"self:{rec.path.parent}"
     ids[1 - me] = (f"opp:{opp}" if own else f"opp:{rec.path.parent}:{opp}") if opp else None
@@ -222,6 +222,13 @@ def main(rep_dirs, out_dir):
                 anon += 1
                 pid = f"anon{anon}"
             groups.setdefault((pid, cid), []).append((rec, side))
+    # profiles left out on purpose (analysis/excluded_profiles.txt: one pseudonym per line, # comments)
+    excl_file = Path(__file__).with_name("excluded_profiles.txt")
+    excluded = set()
+    if excl_file.exists():
+        for line in excl_file.read_text(encoding="utf-8").splitlines():
+            if line.split("#")[0].strip():
+                excluded.add(line.split("#")[0].strip())
     # pseudonyms: players numbered by first appearance; hashes themselves are not written out
     player_no = {"self": 1}  # the recording player is always P01
     index = []
@@ -238,6 +245,9 @@ def main(rep_dirs, out_dir):
                 tb[1] += b
             frames += sum(len(r.frames) for r in rec.rounds)
         if not chunks:
+            continue
+        if name in excluded:
+            print(f"{name:18} excluded (analysis/excluded_profiles.txt)")
             continue
         write_profile(out_dir / f"{name}.t7p", cid, name, frames, chunks, tb)
         kinds = collections.Counter(c.kind for c in chunks)

@@ -22,9 +22,27 @@ your actual inputs rather than react to what it sees.
 
 Video demonstration of Katarina's Ghost AI (work in progress): https://streamable.com/447xkg
 
+### What's new in v0.8.5
+- **Punishment Proficiency** (F1 slider, replaces the Punish checkbox). 0% = the Ghost punishes with the
+  real player's own punishers and timing. 1-100% = the chance that a punish is *perfect*: the best punish
+  for that opening (-10, -12, -13, -14, -15 and slower on block, lows too), on the first possible frame,
+  never delayed or too slow. Recorded for 14 characters (Jin, Kazuya, Asuka, Devil Jin, Feng, Dragunov,
+  Leo, Claudio, Katarina, Josie, Kazumi, Lee, Miguel, Julia); each one knows how far its punishers reach
+  and falls back to the next best when one won't reach.
+- Better punishing in general: moves that slide or land into a follow-up animation are recognised as
+  still recovering, and strings are punished after their last hit, not between hits.
+- Launch punishes go straight into the recorded combo routes.
+
+### What's new in v0.8
+- **Combos** is now a three-way setting: *Player's own combo habits*, *Finish combos when appropriate*
+  (default: full combo routes, ended early when a hit misses or a wall is close) and *Always finish
+  combos*. Combo routes are recorded for 13 characters (Paul, King, Yoshimitsu, Hwoarang, Jin, Asuka,
+  Leo, Claudio, Katarina, Josie, Lee, Miguel, Julia) for their usual launchers, counter-hit launchers and
+  low parries; other launchers use the player's own combos.
+
 ### What's new in v0.7.2
-- **All the Ghosts in one public build**: 63 recorded players over **36 characters**. New ghost data
-  has been added.
+- **All the Ghosts in one public build**: more Ghost training data added - 63 recorded players over
+  **36 characters**, with **Noctis** as a new character.
 - **Native end-of-match menu.** Ghost Battle's menu now lives in the game's own result window, in the
   game's own style: *Rematch*, *Rematch on a new stage*, *Next opponent* (choose with left/right),
   *Return to Character Select* and *Return to Main Menu*. Character Select takes you straight there.
@@ -129,7 +147,11 @@ Thank you!
    recorded players' own choice for the situation - and on top: buffered punishes from learned frame
    data, whiff punishes (dashing in when needed), juggles with the players' own combos, hit-confirms,
    throw breaks, and what it has learned about you.
-4. **Walls.** Every stage was mapped by walking along all of its walls in Practice. The Ghost knows at
+4. **Combo routes and punishes.** Hand-made demonstrations recorded in Practice (Ctrl+F12 in the dev
+   build): `analysis/combos.py` and `analysis/punishes.py` group repeated attempts into routes and
+   punishes (kept when done 3+ times), which the Ghost replays frame by frame after a launch, or on the
+   first free frame after blocking a punishable move (Combos / Punishment Proficiency settings).
+5. **Walls.** Every stage was mapped by walking along all of its walls in Practice. The Ghost knows at
    every moment which floor each fighter is on, which walls have been broken this round, and how far
    each fighter's back is from a wall - and plays accordingly.
 
@@ -148,9 +170,10 @@ See [docs/TECHNICAL.md](docs/TECHNICAL.md) for the memory layout, file formats, 
 | `src/menutrace.hpp` | dev-build recon tools for the game's Scaleform menus |
 | `src/harvest.cpp` | the shareable read-only harvesters (replay / live) |
 | `src/t7.hpp`, `src/names.hpp` | Tekken 7 memory layout; player-name pseudonymisation |
-| `analysis/` | Python: load recordings (replay and live), build profiles, frame data and wall maps |
+| `analysis/` | Python: load recordings (replay and live), build profiles, frame data and wall maps; combo routes and punishes from Practice demonstrations |
 | `tools/` | ini writer, wall-survey checker, replay auto-pilot, memory peek/sampler helpers |
 | `dist/t7ghost.ini`, `dist/walls.txt` | default settings and the stage wall maps shipped with releases |
+| `dist/combos/` | the recorded combo routes (`routes_<char>.txt`) and punishes (`punishes_<char>.txt`) |
 | `third_party/` | MinHook (BSD-2), Dear ImGui (MIT) |
 
 ## Building
@@ -168,6 +191,8 @@ Profiles and maps (Python 3.12, standard library only):
 py analysis/build_profiles.py <recordings dir> [<more dirs, e.g. live data>] <profiles out dir>
 py analysis/framedata.py      <recordings dir> [<more dirs>] <framedata.txt>
 py analysis/build_walls.py    <walls_survey.txt> <walls.txt>
+py analysis/combos.py         <combo recordings dir>     (routes_<char>.txt)
+py analysis/punishes.py       <combo recordings dir>     (punishes_<char>.txt)
 ```
 
 ## Privacy

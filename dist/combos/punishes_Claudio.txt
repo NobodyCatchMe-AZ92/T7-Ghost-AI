@@ -1,0 +1,8 @@
+# Claudio punishes (analysis/punishes.py; kept = done 3+ times, not cut short)
+# kind needed_window punisher hits damage frames lead press reach open launches | moves id@frame(*=hit) | inputs held:frames | damage frames | notation
+char 20
+block 10 1566 2 19 24 10 5 1537 10 0 | 1566@0* 1567@11* | 0:5,16384:7,32768:5,0:17 | 9,23 | 1, 2  # P1 x3
+block 12 1545 2 33 30 10 4 1388 10 0 | 1545@0* 1550@16* | 0:3,8:1,32776:4,8:4,32776:4,8:3,32776:4,8:3,32776:6,8:8 | 11,29 | f+2, f+2  # P2 x3
+block 15 1654 1 13 15 10 5 1859 10 1 | 1654@0* | 0:2,8:1,9:2,8201:3,9:4,8201:3,9:4,8201:4,9:2 | 14 | uf+4  # P3 x3
+low_block 11 1726 1 18 11 10 2 1758 10 0 | 1726@0* | 0:2,8192:3,0:4,8192:3,0:4,8192:5 | 10 | 4  # P4 x3
+low_block 15 1750 1 20 15 10 9 1518 10 1 | 1750@0* | 2:2,0:7,32768:4,0:12 | 14 | 2  # P5 x3

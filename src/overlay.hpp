@@ -257,13 +257,19 @@ void overlay_panel()
 	const char *tfmt = v == 0 ? "player's own rate" : v == 1 ? "never" : "%d %%";
 	if (setting_slider("Throw breaks", v, 0, 100, tfmt, "0 = the real player's own break rate, 1 = never, 2-100 = chance"))
 		c.throw_break = v, save_int(L"throw_break_chance", v);
-	bool pu = c.punish, co = c.combos;
-	if (ImGui::Checkbox("Punish", &pu))
-		c.punish = pu, save_int(L"punish", pu);
-	ImGui::SameLine(200 * sc);
-	if (ImGui::Checkbox("Combos", &co))
-		c.combos = co, save_int(L"combos", co);
-	ImGui::TextDisabled("punish what it can; continue juggles with the player's own combos");
+	v = c.punish_skill;
+	if (setting_slider("Punishment Proficiency", v, 0, 100, "%d %%", "0% = the Ghost punishes with the real player's own punishers and timing. 1-100% = the chance that a punish is perfect: the best punish for that opening (-10, -13, -15, lows, whiffs), on the first possible frame, never delayed or too slow. Characters without recorded punishes keep the player's own."))
+		c.punish_skill = v, save_int(L"punish_proficiency", v);
+	{
+		static const char *styles[] = { "Player's own combo habits", "Finish combos when appropriate", "Always finish combos" };
+		int cs = std::clamp(c.combo_style, 0, 2);
+		ImGui::SetNextItemWidth(300 * sc);
+		if (ImGui::Combo("Combos", &cs, styles, 3))
+			c.combo_style = cs, save_int(L"combo_style", cs);
+		help(cs == 0 ? "After a launch the Ghost continues with the recorded player's own combos, drops and all."
+			: cs == 1 ? "After a launch the Ghost plays a full combo route for that launcher. It stops early when a hit doesn't connect or a wall is close (no unwanted wall splat), and the player's own habits take over. Launchers without a route use the player's own habits."
+			: "After a launch the Ghost plays a full combo route for that launcher to the end, whatever happens. Launchers without a route use the player's own habits.");
+	}
 	ImGui::Spacing();
 
 	// wall awareness: switch + what the AI currently thinks about walls
@@ -294,6 +300,14 @@ void overlay_panel()
 	ImGui::Spacing();
 
 	// Ghost Battle Mode (Treasure Battle reworked)
+#ifndef T7_PUBLIC
+	ImGui::SeparatorText("Combo recording (dev)");
+	if (ImGui::Button(g_rec.f && g_rec.combo ? "Stop combo recording" : "Start combo recording"))
+		g_combo_toggle = true;
+	ImGui::SameLine();
+	ImGui::TextDisabled("Practice: demonstrate combos -> t7ghost/combos (also Ctrl+F12)");
+	ImGui::Spacing();
+#endif
 	ImGui::SeparatorText("Ghost Battle Mode");
 	{
 		auto save_gb = [](const wchar_t *key, int v) { ini_set(L"ghost_battle", key, std::to_wstring(v)); };
@@ -352,10 +366,10 @@ void overlay_panel()
 	{
 		const ghost::Settings d{};
 		c.enabled = d.enabled, c.reaction_frames = d.reaction_frames, c.input_read_chance = d.input_read_chance;
-		c.punish = d.punish, c.combos = d.combos, c.guard_skill = d.guard_skill, c.decision_skill = d.decision_skill;
+		c.punish_skill = d.punish_skill, c.combo_style = d.combo_style, c.guard_skill = d.guard_skill, c.decision_skill = d.decision_skill;
 		c.adapt = d.adapt, c.throw_break = d.throw_break, c.wall_awareness = d.wall_awareness;
 		save_int(L"mod_enabled", d.enabled), save_int(L"reaction_frames", d.reaction_frames);
-		save_int(L"input_read_chance", d.input_read_chance), save_int(L"punish", d.punish), save_int(L"combos", d.combos);
+		save_int(L"input_read_chance", d.input_read_chance), save_int(L"punish_proficiency", d.punish_skill), save_int(L"combo_style", d.combo_style);
 		save_int(L"guard_skill", d.guard_skill), save_int(L"decision_skill", d.decision_skill), save_int(L"adapt", d.adapt);
 		save_int(L"throw_break_chance", d.throw_break), save_int(L"wall_awareness", d.wall_awareness);
 		// Ghost Battle Mode options too
@@ -396,7 +410,8 @@ void overlay_frame(IDXGISwapChain *sc)
 	}
 	const bool hint = GetTickCount64() < g_ov.hint_until;
 	const bool end_menu = gbm::tick(); // Ghost Battle end-of-match menu
-	if (!g_menu_open && !hint && !end_menu)
+	const bool combo_rec = g_rec.f && g_rec.combo; // always visible while combos are being recorded
+	if (!g_menu_open && !hint && !end_menu && !combo_rec)
 		return;
 	if (!g_ov.rtv)
 	{
@@ -414,6 +429,20 @@ void overlay_frame(IDXGISwapChain *sc)
 	ImGui::NewFrame();
 	if (end_menu)
 		gbm::draw();
+	if (combo_rec)
+	{
+		const ImVec2 ds = ImGui::GetIO().DisplaySize;
+		const float s = std::clamp(ds.y / 800.0f, 1.0f, 3.0f);
+		ImGui::GetStyle().FontScaleMain = s;
+		ImGui::SetNextWindowPos(ImVec2(ds.x - 20 * s, 20 * s), ImGuiCond_Always, ImVec2(1.0f, 0.0f));
+		ImGui::SetNextWindowBgAlpha(0.7f);
+		ImGui::Begin("##comborec", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
+			ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoSavedSettings);
+		ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1), "%s COMBO REC", (GetTickCount64() / 500) % 2 ? "o" : "O");
+		ImGui::SameLine();
+		ImGui::TextDisabled("%llu frames   Ctrl+F12 = stop", (unsigned long long)g_rec.frames);
+		ImGui::End();
+	}
 	if (g_menu_open)
 		overlay_panel();
 	else if (!end_menu)

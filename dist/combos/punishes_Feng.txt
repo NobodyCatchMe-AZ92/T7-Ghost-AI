@@ -1,0 +1,8 @@
+# Feng punishes (analysis/punishes.py; kept = done 3+ times, not cut short)
+# kind needed_window punisher hits damage frames lead press reach open launches | moves id@frame(*=hit) | inputs held:frames | damage frames | notation
+char 14
+block 10 1712 2 24 29 10 5 1608 10 0 | 1712@0* 1573@13* | 0:5,16384:3,0:4,4096:4,0:23 | 9,28 | 1, 3  # P1 x3
+block 13 1808 1 33 13 10 6 1417 10 1 | 1808@0 1809@9* | 0:3,4:3,49156:7,32772:10 | 12 | b+1+2  # P2 x3
+block 15 1551 1 15 15 10 0 -1696 10 1 | 1551@0* | 8201:3,9:5,8201:4,9:4,8201:4,9:3,8201:2 | 14 | uf+4  # P4 x3
+low_block 11 1789 1 18 11 10 6 1647 10 0 | 1789@0* | 6:1,0:5,8192:3,0:4,8192:5,0:3 | 10 | 4  # P7 x3
+low_block 15 1788 1 20 15 10 1 1516 10 1 | 1788@0* | 0:1,4096:3,0:4,4096:4,0:4,4096:5,0:4 | 14 | 3  # P8 x3
