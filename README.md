@@ -23,8 +23,8 @@ your actual inputs rather than react to what it sees.
 Video demonstration of Katarina's Ghost AI (work in progress): https://streamable.com/447xkg
 
 ### What's new in v0.7.2
-- **All the Ghosts in one public build**: 63 recorded players over **36 characters**, including the first
-  volunteered data (thank you!) - a Jin player and their opponents, with **Noctis** as a new character.
+- **All the Ghosts in one public build**: 63 recorded players over **36 characters**. New ghost data
+  has been added.
 - **Native end-of-match menu.** Ghost Battle's menu now lives in the game's own result window, in the
   game's own style: *Rematch*, *Rematch on a new stage*, *Next opponent* (choose with left/right),
   *Return to Character Select* and *Return to Main Menu*. Character Select takes you straight there.
