@@ -29,6 +29,17 @@ struct Overlay
 	ULONGLONG forget_armed = 0;
 } g_ov;
 
+// A one-time Windows message box when the mod can't start (2026-10-21: a player saw no note and no F1
+// panel, and the cause only showed in t7ghost.log). Its own thread, so neither the game nor the worker waits.
+void warn_user(const wchar_t *text)
+{
+	CloseHandle(CreateThread(nullptr, 0, [](void *t) -> DWORD {
+		MessageBoxW(nullptr, static_cast<const wchar_t *>(t), L"T7 Ghost AI",
+			MB_OK | MB_ICONWARNING | MB_TOPMOST | MB_SETFOREGROUND);
+		return 0;
+	}, const_cast<wchar_t *>(text), 0, nullptr));
+}
+
 // the menu key also arrives as a window message: a second path next to the key state (deduplicated). (The
 // "F1 dead after the first native menu" bug of 2026-10-19 was a row-array overrun in gbmenu.hpp.)
 std::atomic<bool> g_menu_key_msg{ false };
@@ -282,7 +293,7 @@ void overlay_panel()
 		if (setting_slider("Throw breaks", v, 0, 100, tfmt, "0 = the real player's own break rate, 1 = never, 2-100 = chance"))
 			c.throw_break = v, save_int(L"throw_break_chance", v);
 		v = c.punish_skill;
-		if (setting_slider("Punishment Proficiency", v, 0, 100, "%d %%", "0% = the Ghost punishes with the real player's own punishers and timing. 1-100% = the chance that a punish is perfect: the best punish for that opening (-10, -13, -15, lows, whiffs), on the first possible frame, never delayed or too slow. Characters without recorded punishes keep the player's own."))
+		if (setting_slider("Punishment Proficiency", v, 0, 100, "%d %%", "0% = the Ghost punishes with the real player's own punishers and timing. 1-100% = the chance that a punish is perfect: the best punish for that opening (-10, -13, -15, lows, whiffs), on the first possible frame, never delayed or too slow. Moves that are -22 or worse on block are always punished perfectly (from 20%). Characters without recorded punishes keep the player's own."))
 			c.punish_skill = v, save_int(L"punish_proficiency", v);
 		{
 			static const char *styles[] = { "Player's own combo habits", "Finish combos when appropriate", "Always finish combos" };
@@ -457,6 +468,9 @@ void overlay_frame(IDXGISwapChain *sc)
 		{
 			g_ov.failed = true;
 			logf("overlay: could not start (not a D3D11 swap chain?)");
+			warn_user(L"T7 Ghost AI is loaded, but its settings panel (F1) could not start.\n\n"
+				L"Another overlay or graphics tool may be in the way (ReShade, RivaTuner / MSI Afterburner, "
+				L"Special K, ...). Turn it off and restart the game.\n\nDetails: Win64\\t7ghost\\t7ghost.log");
 			return;
 		}
 		g_ov.init = true;
@@ -568,6 +582,10 @@ bool overlay_install()
 	DestroyWindow(w);
 	UnregisterClassW(wc.lpszClassName, wc.hInstance);
 	logf("overlay: %s", ok ? "hooked Present" : "could not hook Present (no settings panel)");
+	if (!ok)
+		warn_user(L"T7 Ghost AI is loaded, but its settings panel (F1) could not start.\n\n"
+			L"Another overlay or graphics tool may be blocking it (ReShade, RivaTuner / MSI Afterburner, "
+			L"Special K, ...). Turn it off and restart the game.\n\nDetails: Win64\\t7ghost\\t7ghost.log");
 	return ok;
 }
 

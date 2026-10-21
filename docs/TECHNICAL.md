@@ -1,7 +1,8 @@
 # T7 Ghost AI — technical overview
 
 Target: Tekken 7, Steam, final build (`TekkenGame-Win64-Shipping.exe`, PE timestamp `0x63EB1C19`,
-2023-02-14, Unreal Engine 4). The mod checks the timestamp and stays inert on any other build.
+2023-02-14, Unreal Engine 4). The mod checks the timestamp and stays inert on any other build (with a
+one-time message box saying so; another one appears when the overlay can't hook `Present` or start).
 
 ## Loading
 
@@ -145,8 +146,13 @@ last damage before it, a low parry is attack -> airborne without damage. A route
 active on each damage frame. `routes_<char>.txt`, one route per line:
 `starter launcher hits damage frames lead | id@frame ... | held:frames,... | frame:carry,... | notation`
 (`held` = player-relative input words, `carry` = how far the opponent has travelled, in wall-map units).
-At runtime a route starts when our move is a route's launcher within 20 frames of the launch, timed from
-when that move began (its move timer can continue from the move before). Combo style 1 ends it when an
+At runtime a route starts when our move is a route's launcher within 20 frames of the launch, or when we
+left the launcher for its follow-up move at most 8 frames ago (e.g. a df+2 that hands over before the
+opponent is airborne); it is timed from when the launcher began (its move timer can continue from the move
+before). Kazuya also has stun routes (starter `stun`, `combos.py --stun`): they start when our hit puts the
+opponent into a crumple (simple state 12 / 13 / 15 while stunned). A hit is a change of the opponent's
+last-hit damage value; `combos.py --hp-hits` also counts a health-bar drop with an unchanged value (hits
+of equal damage in a row, e.g. Heihachi's screw into Raijin 2, 1). Combo style 1 ends it when an
 expected hit does not land within 10 frames, when the opponent is free again, or before the hit that would
 carry them into a wall (opponent's back distance - 1500 < remaining carry).
 
@@ -159,7 +165,8 @@ cancel window bit `0x1000000` (+0x788) marks the frame they can act. `punishes_<
 start distance, negative = a hard limit; `open` = the input frame of the author's first free frame).
 Punishment Proficiency rolls once per blockstun; on success the punish needing the most frames that fits
 the window and reaches is played (launch punishes first among equals), timed so the author's first free
-frame lands on ours.
+frame lands on ours. Openings of 22 frames or more are always punished perfectly from Punishment
+Proficiency 20%.
 
 ## Taunts (`analysis/taunts.py`, `src/brain.hpp`)
 

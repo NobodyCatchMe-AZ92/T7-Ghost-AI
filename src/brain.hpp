@@ -79,7 +79,7 @@ inline bool load_framedata(const std::wstring &path, FrameData &fd)
 // what to play once a launcher (or a low parry) has put the opponent in the air
 struct Route
 {
-	enum Starter { kNormal, kCounter, kParry };
+	enum Starter { kNormal, kCounter, kParry, kStun };
 	int starter = kNormal, launcher = 0, damage = 0, lead = 0;
 	std::vector<std::pair<int, int>> moves;   // move id, frame it started (from the launcher's start)
 	std::vector<uint32_t> inputs;             // one held word per frame, from `lead` frames before the launcher
@@ -123,7 +123,7 @@ inline int load_routes(const std::wstring &path, Routes &out)
 		int hits = 0, frames = 0;
 		std::istringstream h(f[0]);
 		h >> st >> r.launcher >> hits >> r.damage >> frames >> r.lead;
-		r.starter = st == "counter_hit" ? Route::kCounter : st == "low_parry" ? Route::kParry : Route::kNormal;
+		r.starter = st == "counter_hit" ? Route::kCounter : st == "low_parry" ? Route::kParry : st == "stun" ? Route::kStun : Route::kNormal;
 		std::istringstream mv(f[1]);
 		for (std::string t; mv >> t;)
 			if (const size_t at = t.find('@'); at != std::string::npos)
@@ -520,7 +520,7 @@ public:
 		last_wall_move_ = -1000, ws_pending_ = ws_logged_ = -1;
 		prev_my_cls_ = prev_opp_cls_ = Cls::free, my_free_since_ = opp_free_since_ = 0, adv_ = 0;
 		model_ = nullptr, model_char_ = -1, win_open_ = false, human_down_ = false, last_human_move_ = -1;
-		perfect_roll_ = 0, perfect_move_ = -1, block_stun_ = false, last_atk_key_ = 0, last_atk_level_ = 0;
+		perfect_roll_ = 0, perfect_move_ = -1, perfect_used_ = false, block_stun_ = false, last_atk_key_ = 0, last_atk_level_ = 0;
 		route_ = nullptr, route_ocls_ = Cls::free, route_hp_ = 100, route_dt_ = 0, last_ch_frame_ = -1000, launch_frame_ = -1000, route_tried_ = -1;
 	}
 
@@ -689,7 +689,7 @@ public:
 		// frames since our current move began (its move_timer can continue from the move before: Jin's
 		// d+3+4 second kick 1697 starts at timer 16 - routes then ran 15 frames early)
 		if (me.move_id != my_move_)
-			my_move_ = me.move_id, my_move_t0_ = frame_;
+			my_prev_move_ = my_move_, my_prev_t0_ = my_move_t0_, my_move_ = me.move_id, my_move_t0_ = frame_;
 		my_age_ = int(frame_ - my_move_t0_);
 		taunt_tick(me, opp);
 		route_tick(me, opp);
@@ -1351,6 +1351,9 @@ private:
 	static constexpr int kPunish = 5;          // playing_kind_ of an author's punish
 	int perfect_roll_ = 0;                     // this opening's roll: 1 = perfect, 0 = player's own (or used)
 	int32_t perfect_move_ = -1;                // the move of theirs it was rolled for
+	bool perfect_used_ = false;                // this opening's perfect punish has been played
+	static constexpr int kHeavyMinus = 22;     // -22 or worse on block: always a perfect punish
+	static constexpr int kHeavyFrom = 20;      // ...from this Punishment Proficiency (%) up (author)
 	char punish_note_[200] = "";
 	struct PDiag { bool blocking = false, rec = false, low = false; int my_rem = 0, dist = 0, move = 0, chain = 0, rem = 0, window = -1; const char *why = ""; } pdiag_;
 	char pdiag_note_[240] = "";
@@ -1383,9 +1386,9 @@ private:
 			return pdiag_.why = "no punishes for this character", false;
 		// one roll per opening: per move of theirs (between two attempts they return to idle)
 		if (opp.move_id != perfect_move_)
-			perfect_move_ = opp.move_id, perfect_roll_ = int(rng_() % 100) < cfg.punish_skill;
-		if (!perfect_roll_)
-			return pdiag_.why = "roll: player's own", false;
+			perfect_move_ = opp.move_id, perfect_roll_ = int(rng_() % 100) < cfg.punish_skill, perfect_used_ = false;
+		if (perfect_used_)
+			return pdiag_.why = "used", false;
 		const bool crouching = me.simple == 5 || me.simple == 6 || me.simple == 7;
 		// a low we just blocked counts as low even on our first free frame (we may be standing up already)
 		const bool low = blocking ? (blocked_level_ == 1 || crouching) : (crouching || (known_window_ > 0 && blocked_level_ == 1));
@@ -1402,6 +1405,12 @@ private:
 			else
 				window = punish_window(blocked_key_, opp, my_rem);
 		}
+		// heavily minus moves (-22 or worse) are always punished perfectly, from Punishment Proficiency 20%
+		// up (author, 2026-10-20: Leo's db+4 / FC df+3 got the recorded player's little crouch kick); 0% =
+		// the player's own punishing stays as it is
+		const bool heavy = window >= kHeavyMinus && cfg.punish_skill >= kHeavyFrom;
+		if (!perfect_roll_ && !heavy)
+			return pdiag_.why = "roll: player's own", false;
 		// the author's punishes for this opening: the biggest window class that fits
 		const Route *pick = nullptr;
 		std::vector<const Route *> c;
@@ -1453,11 +1462,11 @@ private:
 		playing_kind_ = kPunish;
 		interruptible_ = false;
 		dbg.decided = true;
-		perfect_roll_ = 0; // used
+		perfect_roll_ = 0, perfect_used_ = true; // used
 		pdiag_.why = "played";
 		static const char *on[] = { "", "low ", "whiff " };
-		snprintf(punish_note_, sizeof punish_note_, "perfect punish: %s-%d %s (%d dmg)", on[pick->opening], pick->window,
-			pick->notation.c_str(), pick->damage);
+		snprintf(punish_note_, sizeof punish_note_, "perfect punish: %s-%d %s (%d dmg) [window %d%s]", on[pick->opening], pick->window,
+			pick->notation.c_str(), pick->damage, window, heavy ? ", -22 or worse: always" : "");
 		last_event = punish_note_;
 		return true;
 	}
@@ -1494,16 +1503,41 @@ private:
 	int32_t route_hp_ = 100, route_dt_ = 0;
 	int64_t last_ch_frame_ = -1000, launch_frame_ = -1000;
 	int32_t route_tried_ = -1; // our move a route was last looked up for (once per move)
-	int32_t my_move_ = -1;
-	int64_t my_move_t0_ = 0;
+	bool route_crumple_ = false;
+	int64_t stun_frame_ = -1000;
+	static constexpr int kStunRouteChar = 9; // stun-start routes: Kazuya only (author)
+	int32_t my_move_ = -1, my_prev_move_ = -1;
+	int64_t my_move_t0_ = 0, my_prev_t0_ = 0;
 	int my_age_ = 0;
 	char route_note_[200] = "";
+
+	// Our launcher, or the move it just handed over to: the opponent can show as airborne only once the
+	// launcher has moved on (Josie's df+2 1655 -> 1656 - her df+2 route never started, 2026-10-19)
+	bool launched_by(const Route &r, const Snap &me) const
+	{
+		return r.launcher == me.move_id || (r.launcher == my_prev_move_ && my_age_ <= 8);
+	}
+	// where we are in a route: frames since its launcher started (our move's place in it, else the
+	// launcher's start when we are already in its follow-on move)
+	int route_frame(const Route &r, const Snap &me) const
+	{
+		for (const auto &[mv, a] : r.moves)
+			if (mv == me.move_id)
+				return a + my_age_;
+		return r.launcher == my_prev_move_ ? int(frame_ - my_prev_t0_) : my_age_;
+	}
 
 	void route_tick(const Snap &me, const Snap &opp)
 	{
 		const Cls oc = cls(opp);
 		if (oc == Cls::juggled && route_ocls_ != Cls::juggled)
 			launch_frame_ = frame_, route_tried_ = -1;
+		// a crumple-type stun from our hit (simple state 12 / 13 / 15 while stunned): stun routes start here
+		// - Kazuya only for now (author, 2026-10-20: his stun moves into a guaranteed f,f+4)
+		const bool crumple = oc == Cls::stun && (opp.simple == 12 || opp.simple == 13 || opp.simple == 15);
+		if (crumple && !route_crumple_)
+			stun_frame_ = frame_, route_tried_ = -1;
+		route_crumple_ = crumple;
 		route_ocls_ = oc;
 		const bool hit = opp.hp < route_hp_ || (opp.damage_taken != route_dt_ && opp.damage_taken > 0);
 		route_hp_ = opp.hp, route_dt_ = opp.damage_taken;
@@ -1536,7 +1570,9 @@ private:
 		}
 		// a route starts when our move is its launcher, up to 20 frames into the juggle: a two-part launcher
 		// (Jin's d+3+4 = 1695 then 1697) can lift them while its first part is still out
-		if (cfg.combo_style == 0 || oc != Cls::juggled || frame_ - launch_frame_ > 20 || me.move_id == route_tried_ ||
+		const bool by_launch = oc == Cls::juggled && frame_ - launch_frame_ <= 20;
+		const bool by_stun = crumple && me.char_id == kStunRouteChar && frame_ - stun_frame_ <= 20;
+		if (cfg.combo_style == 0 || !(by_launch || by_stun) || me.move_id == route_tried_ ||
 			(playing_kind_ == kTaunt && !playing_.empty()))
 			return;
 		route_tried_ = me.move_id;
@@ -1548,16 +1584,13 @@ private:
 		std::vector<const Route *> c;
 		for (int pass = 0; pass < 2 && c.empty(); ++pass)
 			for (const auto &r : it->second)
-				if (r.launcher == me.move_id && (pass == 1 || (r.starter == Route::kCounter) == ch || r.starter == Route::kParry))
+				if (launched_by(r, me) && (r.starter == Route::kStun) == (by_stun && !by_launch) &&
+					(pass == 1 || (r.starter == Route::kCounter) == ch || r.starter == Route::kParry || r.starter == Route::kStun))
 					c.push_back(&r);
 		if (c.empty())
 			return;
 		// where we are in the route: our current move's frame
-		const Route *r0 = c.front();
-		int at = 0;
-		for (const auto &[mv, a] : r0->moves)
-			if (mv == me.move_id) { at = a; break; }
-		const int t = at + my_age_;
+		const int t = route_frame(*c.front(), me);
 		// style 1 at a wall: prefer a route that keeps them off the wall; else end before it would splat
 		float room = -1;
 		if (cfg.combo_style == 1 && wall_info.opp_back > 0)
@@ -1578,10 +1611,7 @@ private:
 		}
 		const Route *r = c[rng_() % c.size()];
 		// the chosen route's own frame for our move (routes of one launcher share it closely)
-		at = 0;
-		for (const auto &[mv, a] : r->moves)
-			if (mv == me.move_id) { at = a; break; }
-		const int rt = at + my_age_;
+		const int rt = route_frame(*r, me);
 		const size_t start = size_t(r->lead + rt);
 		if (start >= r->inputs.size())
 			return;
@@ -1606,7 +1636,7 @@ private:
 		playing_kind_ = kRoute;
 		interruptible_ = false;
 		route_ = r;
-		static const char *sn[] = { "", "CH ", "low parry " };
+		static const char *sn[] = { "", "CH ", "low parry ", "stun " };
 		snprintf(route_note_, sizeof route_note_, "combo route: %s%s (%d dmg)%s", sn[r->starter], r->notation.c_str(),
 			r->damage, route_cut_ >= 0 ? " - wall close, ends early" : "");
 		last_event = route_note_, dbg.decided = true;

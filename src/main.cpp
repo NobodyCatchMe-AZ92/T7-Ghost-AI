@@ -43,7 +43,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 
 namespace {
 
-#define T7_VERSION_STR "1.0a" // keep in step with the t7ghost.ini header (tools/write_ini.py)
+#define T7_VERSION_STR "1.0b (WIP)" // keep in step with the t7ghost.ini header (tools/write_ini.py)
 constexpr const char *kModVersion = T7_VERSION_STR;
 std::wstring g_dir; // .../Win64/t7ghost/
 FILE *g_log = nullptr;
@@ -1077,6 +1077,10 @@ DWORD WINAPI worker(void *)
 	if (t7::exe_stamp() != t7::kExeStamp)
 	{
 		logf("unsupported game build (expected 0x%08X); staying inert", t7::kExeStamp);
+		warn_user(L"T7 Ghost AI is not active: this TEKKEN 7 version is not supported.\n\n"
+			L"The mod needs the latest Steam version of TEKKEN 7. Update the game through Steam "
+			L"(or right-click TEKKEN 7 > Properties > Installed Files > Verify integrity of game files).\n\n"
+			L"The game itself runs normally; the mod stays switched off.");
 		return 0;
 	}
 #ifdef T7_PUBLIC

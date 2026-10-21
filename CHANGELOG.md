@@ -3,6 +3,27 @@
 Version numbers: the **number** changes when new features are added (v1.0a -> v1.1a), the **letter**
 changes when the Ghosts get new training data (v1.0a -> v1.0b).
 
+## v1.0b (work in progress)
+A progress build: v1.0b is not finished yet (more changes to the Ghosts' behaviour are coming). Everything
+below stays part of v1.0b.
+- **Recorded punishes for every Ghost** - 36 characters (was 14): Akuma, Alisa, Bryan, Eliza, Ganryu,
+  Gigas, Heihachi, Hwoarang, Jack-7, King, Kuma, Lars, Lei, Lili, Lucky Chloe, Negan, Noctis, Paul,
+  Shaheen, Steve, Xiaoyu and Yoshimitsu are new. Where a character has no 15 f punish, or a hard one,
+  slower or faster alternatives are recorded instead (e.g. 13 f and 18 f low punishes), and short-range
+  punishers fall back to a longer-range one when they won't reach.
+- **Heavy punishes are always punished**: a move that is -22 or worse on block is always punished
+  perfectly once Punishment Proficiency is 20% or more (the Medium Challenge preset and up).
+- **Combo routes for 21 characters** (was 13): Devil Jin, Feng, Ganryu, Gigas, Heihachi, Kazumi, Kazuya
+  and Negan are new; Josie's ws2,1, Julia's ws1 and Negan's ws2 now lead into recorded combos. Kazuya also
+  has combos after his crumple stuns.
+- Combo routes start reliably after launchers that hand over into a follow-up move (e.g. Josie's df+2 used
+  to skip her combo most of the time).
+- **Taunts** for Heihachi and Lucky Chloe (19 characters).
+- **Startup warnings**: if the mod can't start, a Windows message box now says why instead of the mod
+  silently doing nothing - an unsupported TEKKEN 7 version (the mod needs the latest Steam version), or
+  a settings panel blocked by another overlay or graphics tool.
+- README.txt has a *Troubleshooting* section (no note in the top-left corner, F1 does nothing).
+
 ## v1.0a
 - **Ghost AI Presets.** A "Ghost AI Preset" dropdown in the F1 panel: *Fair*, *Medium Challenge*,
   *Challenging* (default) and *Unfair* - or *Custom Settings* for your own. While a preset is chosen the

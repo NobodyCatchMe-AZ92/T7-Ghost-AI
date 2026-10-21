@@ -9,7 +9,7 @@ defaults below are written (release template).
 import configparser
 import sys
 
-VERSION = "1.0a"  # keep in step with T7_VERSION_STR in src/main.cpp (letter = new ghost data, number = new features)
+VERSION = "1.0b (WIP)"  # keep in step with T7_VERSION_STR in src/main.cpp (letter = new ghost data, number = new features)
 DOWNLOAD = "https://github.com/NobodyCatchMe-AZ92/T7-Ghost-AI"
 
 # (key, default, explanation)

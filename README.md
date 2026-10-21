@@ -22,63 +22,19 @@ your actual inputs rather than react to what it sees.
 
 Video demonstration of Katarina's Ghost AI (work in progress): https://streamable.com/447xkg
 
-
-## DOWNLOADING AND INSTALLING
-(see Releases):
-
-**T7 Ghost Mod 1.0a** - the Ghost AI with every Ghost (36 characters). Drop the contents of its `Win64`
-folder into `TEKKEN 7\TekkenGame\Binaries\Win64` (next to the game exe), then play Ghost Battle (the
-reworked Treasure Battle), Arcade Battle, or Practice with the opponent set to "CPU" on "Ultra Hard".
-Press F1 to tune the Ghosts in real time. Its README.txt explains everything; CHANGELOG.md lists what
-changed.
-
-
-
-## HELP THE MOD IMPROVE - COLLECT GHOST DATA AND SEND IT TO ME!
-I need help collecting DATA for the AI character profiles. What I could collect by myself is still very
-limited - around 110 matches - so a lot of characters and play styles are missing from the mod.
-
-Your data is anonymized - players are identified only by a code, never by a username or Steam ID. By
-default the mod merges all collected data for a character, no matter the player, into one big
-character profile.
-
-There are two ways you can help me collect data:
-
-#### Data Collection Method 1: Replay Harvester
-Install the Replay Harvester DLL into your game and watch your saved replays. Press *Ctrl+F8* on the
-Battle Log with your first replay highlighted, and the harvester navigates the replay menu by itself
-and plays one replay after another (so you can walk away and grab a coffee while it runs; press
-*Ctrl+F8* again to stop it). Turn off the in-replay tips ("Recommended Combo" / "Recommended
-Punishment") first - they pause the replays. Harvested data goes into a folder next to your game exe
-called "t7GhostReplayData", which you then send to me.
-
-#### Data Collection Method 2: Live Harvester
-Install the LIVE Harvester DLL into your game and play or spectate online matches like you normally
-would. Harvested data goes into a folder next to your game exe called "t7GhostLIVEplayData", which you
-then send to me. Only human players help the Ghosts: online matches, spectating, and offline matches
-between two people are great - please **don't** send offline fights against the CPU.
-
-I did look into having people send me their Tekken 7 replay save files instead, but loading another
-account's replay saves corrupts the save data, and reading those files directly wouldn't help anyway:
-the AI needs not just the stored inputs but how the game engine reacted to them, which can only be
-observed by playing the replay back in-game.
-
-
-### Please send all volunteered Ghost Data to the email address: DreamOfCasinoSoul@proton.me
-
-**NEVER send the folder "t7GhostHarvest_private".** It holds the secret key that turns player names
-into the anonymous codes in your data - with that key, someone could check guessed names against the
-codes. The data folders themselves contain only gameplay (moves, positions, health, inputs) with
-players as codes: nothing about you, your PC or your Steam account.
-
-PLEASE HELP MAKE THIS MOD BETTER! IT DEPENDS ON BEING FED LOTS OF DATA - WHICH I CAN'T DO ALONE! We can
-improve the Tekken 7 offline experience into something truly fun, starting with this mod!
-
-Thank you!
-
+### What's new in v1.0b (work in progress)
+The full list of changes in every version is in [CHANGELOG.md](CHANGELOG.md). v1.0b is not finished yet -
+this is a progress build, and more changes to the Ghosts' behaviour will follow under the same version.
+- **Recorded punishes for every Ghost** (36 characters, was 14), with fallbacks when a punisher won't
+  reach; moves -22 or worse on block are always punished from Punishment Proficiency 20%.
+- **Combo routes for 21 characters** (was 13): Devil Jin, Feng, Ganryu, Gigas, Heihachi, Kazumi, Kazuya
+  and Negan are new; more launchers lead into recorded combos, and combos start reliably after launchers
+  that hand over into a follow-up move.
+- **Taunts** for Heihachi and Lucky Chloe (19 characters).
+- If the mod can't start, a message box now says why (unsupported game version, or the settings panel
+  blocked by another overlay); README.txt has a Troubleshooting section.
 
 ### What's new in v1.0a
-The full list of changes in every version is in [CHANGELOG.md](CHANGELOG.md).
 - **Ghost AI Presets**: pick *Fair*, *Medium Challenge*, *Challenging* (default) or *Unfair* in the F1
   panel and play - no sliders needed. *Custom Settings* keeps your own configuration.
 - **Game Modifiers** (offline only, from the next match, all off by default): **No Rage**.
@@ -142,6 +98,68 @@ The full list of changes in every version is in [CHANGELOG.md](CHANGELOG.md).
 - **Online matches as training data.** The new Live Harvester records matches you play or spectate.
 - **More data:** the profiles now come from about 110 matches (saved replays plus online matches),
   and all players of a character are merged into one big profile by default.
+
+
+## HELP THE MOD IMPROVE - COLLECT GHOST DATA AND SEND IT TO ME!
+I need help collecting DATA for the AI character profiles. What I could collect by myself is still very
+limited - around 110 matches - so a lot of characters and play styles are missing from the mod.
+
+Your data is anonymized - players are identified only by a code, never by a username or Steam ID. By
+default the mod merges all collected data for a character, no matter the player, into one big
+character profile.
+
+There are two ways you can help me collect data:
+
+#### Data Collection Method 1: Replay Harvester
+Install the Replay Harvester DLL into your game and watch your saved replays. Press *Ctrl+F8* on the
+Battle Log with your first replay highlighted, and the harvester navigates the replay menu by itself
+and plays one replay after another (so you can walk away and grab a coffee while it runs; press
+*Ctrl+F8* again to stop it). Turn off the in-replay tips ("Recommended Combo" / "Recommended
+Punishment") first - they pause the replays. Harvested data goes into a folder next to your game exe
+called "t7GhostReplayData", which you then send to me.
+
+#### Data Collection Method 2: Live Harvester
+Install the LIVE Harvester DLL into your game and play or spectate online matches like you normally
+would. Harvested data goes into a folder next to your game exe called "t7GhostLIVEplayData", which you
+then send to me. Only human players help the Ghosts: online matches, spectating, and offline matches
+between two people are great - please **don't** send offline fights against the CPU.
+
+I did look into having people send me their Tekken 7 replay save files instead, but loading another
+account's replay saves corrupts the save data, and reading those files directly wouldn't help anyway:
+the AI needs not just the stored inputs but how the game engine reacted to them, which can only be
+observed by playing the replay back in-game.
+
+
+## DOWNLOADING AND INSTALLING
+Available for download (see Releases):
+
+One zip with two folders - pick one:
+
+**T7 Ghost Mod 1.0b (WIP)** - the Ghost AI with every Ghost (36 characters). Drop the contents of its `Win64`
+folder into `TEKKEN 7\TekkenGame\Binaries\Win64` (next to the game exe), then play Ghost Battle (the
+reworked Treasure Battle), Arcade Battle, or Practice with the opponent set to "CPU" on "Ultra Hard".
+Press F1 to tune the Ghosts in real time. Its README.txt explains everything; CHANGELOG.md lists what
+changed.
+
+**Data Harvesters (for gathering and volunteering your own ghost data)** - if you want to help populate
+the character data: put a harvester's `version.dll` next to your game exe, then send me the Ghost Data
+folders it creates (t7GhostLIVEplayData and t7GhostReplayData). Use the Replay Harvester while you watch
+your saved replays, and the Live Harvester while you play or spectate online matches. Its README.txt
+explains everything.
+
+### Please send all volunteered Ghost Data to the email address: DreamOfCasinoSoul@proton.me
+
+OR upload to mediafire and send the link in this mod page's comments.
+
+**NEVER send the folder "t7GhostHarvest_private".** It holds the secret key that turns player names
+into the anonymous codes in your data - with that key, someone could check guessed names against the
+codes. The data folders themselves contain only gameplay (moves, positions, health, inputs) with
+players as codes: nothing about you, your PC or your Steam account.
+
+PLEASE HELP MAKE THIS MOD BETTER! IT DEPENDS ON BEING FED LOTS OF DATA - WHICH I CAN'T DO ALONE! We can
+improve the Tekken 7 offline experience into something truly fun, starting with this mod!
+
+Thank you!
 
 
 ## How it works (short)
