@@ -93,12 +93,16 @@ def combos_in(frames, me):
     op = "p2" if me == "p1" else "p1"
     n = len(frames)
     states = [cls(f[op]) for f in frames]
-    dmg = damage_steps(frames, op)
+    dmg = damage_steps(frames, op, HP_HITS)
     # low parries: the opponent goes from attacking into a stun without taking damage
     parries = [i for i in range(1, n) if states[i] == "stun" and states[i - 1] == "attack" and dmg[i] == 0]
     found, i = [], 1
     while i < n:
-        if not (states[i] == "juggled" and states[i - 1] != "juggled"):
+        # --stun: also combos that start with a crumple-type stun (Kazuya, 2026-10-20: a stun move, then
+        # a guaranteed f,f+4): our hit puts them into simple state 12 / 13 / 15 while stunned
+        stun_start = (STUN_STARTS and states[i] == "stun" and int(frames[i][op]["simple_state"]) in CRUMPLE
+                      and int(frames[i - 1][op]["simple_state"]) not in CRUMPLE)
+        if not (states[i] == "juggled" and states[i - 1] != "juggled") and not stun_start:
             i += 1
             continue
         # the launcher: my move when the launching hit landed (the last damage on or before the launch)
@@ -127,7 +131,7 @@ def combos_in(frames, me):
             j += 1
         outcomes = {int(frames[k][op]["hit_outcome"]) for k in range(t0, min(i + 3, n))}
         parried = [p for p in parries if 0 <= t0 - p <= PARRY_WINDOW]
-        starter = "low parry" if parried or low_parry else "counter hit" if outcomes & {10, 11} else "normal hit"
+        starter = "stun" if stun_start else "low parry" if parried or low_parry else "counter hit" if outcomes & {10, 11} else "normal hit"
         # moves from the launcher to the last hit
         moves, k = [], t0
         while k <= last_hit:
@@ -193,7 +197,19 @@ def combos_in(frames, me):
 
 
 def main(args):
+    global KEEP_ALL
     side, out = "p1", None
+    global STUN_STARTS
+    if "--stun" in args:
+        STUN_STARTS = True
+        args.remove("--stun")
+    global HP_HITS
+    if "--hp-hits" in args:  # hits with the same damage as the one before (Heihachi's screw 6, Raijin 2 6, 1 6)
+        HP_HITS = True
+        args.remove("--hp-hits")
+    if "--all" in args:  # frame-perfect demonstrations (Practice dummy playback): every route counts
+        KEEP_ALL = True
+        args.remove("--all")
     if "--side" in args:
         k = args.index("--side")
         side = args[k + 1]
@@ -237,6 +253,11 @@ def manual_keep():
 
 
 MANUAL_KEEP, MANUAL_LATEST = manual_keep()
+STUN_STARTS = False  # --stun: combos may also start from a crumple-type stun
+HP_HITS = False  # --hp-hits: a health-bar drop with an unchanged damage value is a hit too (2026-10-21);
+                 # off by default so the approved routes read the same
+CRUMPLE = {12, 13, 15}
+KEEP_ALL = False  # --all: the 3-attempt rule is for human attempts; dummy playback is exact
 
 
 def dropped(g, groups):
@@ -251,7 +272,7 @@ def report(allc, out_dir):
     name = char_name(allc[0]["char"]).replace(" ", "")
     out = out_dir / f"combos_{name}_candidates.txt"
     # group the attempts: same starter, launcher and hitting moves = one route
-    order = {"normal hit": 0, "counter hit": 1, "low parry": 2}
+    order = {"normal hit": 0, "counter hit": 1, "low parry": 2, "stun": 3}
     routes = {}
     for n, c in enumerate(allc, 1):
         c["n"] = n
@@ -277,7 +298,7 @@ def report(allc, out_dir):
             print()
             print(title)
             lines += ["", title]
-        keep = (len(g) >= KEEP_MIN and not dropped(g, groups)) or (name, best["launcher"], best["route"]) in MANUAL_KEEP
+        keep = ((len(g) >= KEEP_MIN or KEEP_ALL) and not dropped(g, groups)) or (name, best["launcher"], best["route"]) in MANUAL_KEEP
         tag = "KEEP" if keep else ("cut " if len(g) >= KEEP_MIN else "    ")
         row = (f"{tag} R{r:<3} x{len(g)}  {best['hits']} hits  {best['damage']} dmg   "
                + ", ".join(x for x in best["notation"] if x) + f"   (attempt #{best['n']})")

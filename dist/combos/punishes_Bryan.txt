@@ -1,0 +1,8 @@
+# Bryan punishes (analysis/punishes.py; kept = done 3+ times, not cut short)
+# kind needed_window punisher hits damage frames lead press reach open launches | moves id@frame(*=hit) | inputs held:frames | damage frames | notation
+char 7
+block 10 1768 2 21 25 10 4 1582 10 0 | 1768@0* 1796@10* | 0:4,16384:5,0:4,8192:5,0:17 | 9,24 | 1, 4  # P2 x1
+block 12 1624 2 27 36 10 7 1282 10 0 | 1624@0 1626@11* 1821@12* | 0:7,8192:6,0:2,4096:5,0:26 | 11,35 | 4, 3  # P3 x3
+block 14 1620 1 20 14 10 9 2158 10 1 | 1620@0* | 0:3,8:2,0:3,4:1,32772:5,32768:1,0:9 | 13 | b+2  # P4 x5
+low_block 11 1701 1 16 11 10 7 1707 10 0 | 1701@0* | 8192:2,0:5,8192:4,0:4,8192:4,0:2 | 10 | 4  # P5 x3
+low_block 15 1695 1 20 15 10 4 1527 10 1 | 1695@0* | 0:4,16384:4,0:5,16384:3,0:5,16384:4 | 14 | 1  # P6 x3

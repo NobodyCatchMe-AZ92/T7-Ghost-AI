@@ -14,3 +14,18 @@ Kazumi block 15 1522 strict       # uf+4: very short reach; otherwise 3,2 (2026-
 Kazumi low_block 15 1522 strict   # uf+4 after a low: very short reach; otherwise ws1,2
 Miguel block 15 1588 strict       # uf+4: short reach; otherwise f+1+2 (14); -16+ df+2,1 (2026-10-19)
 Miguel low_block 15 1588 strict   # uf+4 after a low: short reach; otherwise ws2,4
+-Paul block 10 1590,1750        # 2,3 - not a natural combo (author): discarded
+Paul block 13 1613,1614         # b+1,2 - recorded once, kept
+Paul block 15 1663              # df+2 - recorded once, kept
+Paul low_block 11 1686          # ws4 - recorded once, kept
+Paul low_block 15 1782          # ws2 - recorded once, kept
+Paul block 10 1606,1585          # the new 10 f punish (1,2?) - recorded once, kept (author, 2026-10-20)
+Yoshimitsu block 10 1570,1571      # 2,2 - done twice, kept (author, 2026-10-20)
+Ganryu block 13 1561,1563         # 2,1 - 3 attempts split over two measured windows (11 and 12/13); one punish (needs 12)
+-Gigas block 15 1998        # the 15 f standing punish - discarded by the author ('crap')
+Jack-7 low_block 11 1700       # 4 on -11 lows: 3 attempts, the third started 1 f late and grouped apart (2026-10-21)
+-Lei block 12 1629               # 4 - came out during the abandoned 12 f alternative (author: f+2,4 is his 12 f punish) (2026-10-21)
+-Lei block 13 1699,1702,1704,1930  # 4,1,2,2,2 - the abandoned alternative, started 4-8 f late
+Bryan block 10 1768,1796         # 1,4 - his -10 punish, done twice (the 2nd attempt added an unrelated f,f+1 later) (2026-10-21)
+Alisa block 15 1565,1564 strict   # uf+4,4: short range - only from as close as the author did it; otherwise f+3,2 (2026-10-21)
+Alisa block 15 1881,1883         # f+3,2: the fallback when uf+4,4 will not reach (3 attempts; one grouped apart by a later dash)

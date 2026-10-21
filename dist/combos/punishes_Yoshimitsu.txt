@@ -1,0 +1,8 @@
+# Yoshimitsu punishes (analysis/punishes.py; kept = done 3+ times, not cut short)
+# kind needed_window punisher hits damage frames lead press reach open launches | moves id@frame(*=hit) | inputs held:frames | damage frames | notation
+char 3
+block 10 1570 2 18 29 10 7 1559 10 0 | 1570@0* 1571@11* | 0:7,32768:3,0:4,32768:4,0:21 | 9,28 | 2, 2  # P1 x2
+block 13 1817 2 31 32 10 7 1401 10 0 | 1817@0* 1818@15* | 0:3,10:4,16394:4,10:3,8192:6,0:22 | 12,31 | df+1, 4  # P2 x3
+block 15 1535 1 15 15 10 4 1989 10 1 | 1535@0* | 9:4,4105:3,9:5,4105:4,9:9 | 14 | uf+3  # P3 x3
+low_block 11 1711 1 14 11 10 3 1714 10 0 | 1711@0* | 0:3,8192:3,0:4,8192:5,0:6 | 10 | 4  # P4 x3
+low_block 15 1535 1 15 15 10 8 1569 10 1 | 1535@0* | 2:1,0:3,1:1,9:3,4105:3,9:4,4105:5,9:3,4105:2 | 14 | uf+3  # P5 x3

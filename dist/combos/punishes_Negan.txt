@@ -1,0 +1,8 @@
+# Negan punishes (analysis/punishes.py; kept = done 3+ times, not cut short)
+# kind needed_window punisher hits damage frames lead press reach open launches | moves id@frame(*=hit) | inputs held:frames | damage frames | notation
+char 50
+block 10 1574 3 29 52 10 3 1517 10 0 | 1574@0* 1577@10* 1580@29* | 0:3,16384:6,0:2,32768:5,0:5,8192:4,0:37 | 9,26,51 | 1, 2, 4  # P1 x3
+block 13 1726 2 38 28 10 5 1391 10 1 | 1726@0* 1727@15* | 0:5,49152:5,32768:1,0:27 | 12,27 | 1+2  # P2 x3
+block 15 1720 1 12 15 10 0 2033 10 1 | 1720@0* | 32778:3,10:4,32778:4,10:4,32778:4,10:4,32778:2 | 14 | df+2  # P3 x3
+low_block 11 1757 1 18 11 10 5 1776 10 0 | 1757@0* | 2:5,8192:3,0:13 | 10 | 4  # P4 x3
+low_block 15 1751 1 20 15 10 4 1598 10 1 | 1751@0 1752@1* | 0:4,32768:5,0:16 | 14 | 2  # P5 x3

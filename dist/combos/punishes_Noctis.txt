@@ -1,0 +1,8 @@
+# Noctis punishes (analysis/punishes.py; kept = done 3+ times, not cut short)
+# kind needed_window punisher hits damage frames lead press reach open launches | moves id@frame(*=hit) | inputs held:frames | damage frames | notation
+char 44
+block 10 1475 3 27 42 10 5 1525 10 0 | 1475@0* 1476@10* 1477@25* | 0:5,16384:4,0:4,32768:3,0:4,32768:4,0:5,32768:4,0:19 | 9,21,41 | 1, 2, 2  # P1 x3
+block 12 1567 2 31 36 10 5 1385 10 0 | 1567@0* 1568@18* | 4:5,16388:5,4:3,0:1,32768:5,0:27 | 11,35 | b+1, 2  # P2 x3
+block 15 1620 1 20 15 10 1 1806 10 1 | 1620@0* | 10:1,32778:4,10:5,32778:3,10:6,32778:6 | 14 | df+2  # P3 x3
+low_block 11 1657 1 15 11 10 4 1634 10 0 | 1657@0* | 6:1,0:3,8192:5,0:4,8192:6,0:2 | 10 | 4  # P4 x3
+low_block 15 1643 2 31 42 10 0 1468 10 1 | 1643@0* 1644@16* | 32768:4,0:5,32768:3,0:6,32768:3,0:4,32768:7,0:20 | 14,41 | 2, 2  # P5 x3

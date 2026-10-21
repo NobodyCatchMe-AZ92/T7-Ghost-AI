@@ -1,0 +1,8 @@
+# Eliza punishes (analysis/punishes.py; kept = done 3+ times, not cut short)
+# kind needed_window punisher hits damage frames lead press reach open launches | moves id@frame(*=hit) | inputs held:frames | damage frames | notation
+char 36
+block 10 1503 2 17 26 10 5 1462 10 0 | 1503@0 1504@4* 1515@14* | 0:5,16384:5,0:3,32768:5,0:18 | 9,25 | 1, 2  # P1 x3
+block 13 1596 2 26 33 10 6 1330 10 0 | 1596@0* 1597@15* | 0:1,8:1,10:4,16394:5,10:1,0:3,8192:5,0:23 | 12,32 | df+1, 4  # P2 x3
+block 15 1547 2 24 36 10 6 1973 10 1 | 1547@0* 1922@22* | 0:3,4:3,8196:4,8192:1,0:11,8:4,2:3,16394:3,16392:2,0:12 | 14,35 | b+4, df+1  # P4 x3
+low_block 11 1623 1 15 11 10 2 1701 10 0 | 1623@0* | 0:2,8192:4,0:5,8192:3,0:5,8192:2 | 10 | 4  # P5 x3
+low_block 15 1621 1 20 15 10 5 1427 10 1 | 1621@0* | 0:5,4096:4,0:4,4096:4,0:5,4096:2,0:1 | 14 | 3  # P6 x3

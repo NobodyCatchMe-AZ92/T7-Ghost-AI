@@ -1,0 +1,3 @@
+# Heihachi taunts (analysis/taunts.py): one per line - frames | inputs held:frames  # file ko-frame
+char 8
+156 | 0:128,4:5,0:4,4:5,0:4,4:2,12292:6,12288:2  # combo_20261022_000018 1699
