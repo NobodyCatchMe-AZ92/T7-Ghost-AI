@@ -11,6 +11,7 @@
 //   Ctrl+F10 start/stop write-watch on P2 input fields (hardware breakpoints)
 // Live readout is rewritten to t7ghost/status.txt twice a second.
 #include "t7.hpp"
+#include "loader.hpp"
 #include "brain.hpp"
 #include "names.hpp"
 #include "finder.hpp"
@@ -43,7 +44,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 
 namespace {
 
-#define T7_VERSION_STR "1.0b (WIP)" // keep in step with the t7ghost.ini header (tools/write_ini.py)
+#define T7_VERSION_STR "1.1a" // keep in step with the t7ghost.ini header (tools/write_ini.py)
 constexpr const char *kModVersion = T7_VERSION_STR;
 std::wstring g_dir; // .../Win64/t7ghost/
 FILE *g_log = nullptr;
@@ -512,16 +513,31 @@ ghost::Brain *load_brain()
 	b->cfg.ghost_battle = geti(L"ghost_battle", L"enabled", 1) != 0;
 	b->cfg.gb_random_stage = geti(L"ghost_battle", L"random_stage", 1) != 0;
 	b->cfg.gb_ghost_opponents = geti(L"ghost_battle", L"ghost_opponents", 1) != 0;
-	b->cfg.gb_special_fights = geti(L"ghost_battle", L"special_fights", 0) != 0;
-	// costumes 0/1/2 (2026-10-19); an older ini's default_costumes=1 meant 1P costumes only
-	b->cfg.gb_costume_test = std::clamp(geti(L"ghost_battle", L"costume_test", 0), 0, 3);
-	b->cfg.gb_costumes = std::clamp(geti(L"ghost_battle", L"costumes", geti(L"ghost_battle", L"default_costumes", 0) ? 1 : 0), 0, 2);
+	{
+		// special fights per kind; an older ini's special_fights=1 turns them all on
+		const int all = geti(L"ghost_battle", L"special_fights", 0);
+		b->cfg.gb_sp_boss = geti(L"ghost_battle", L"special_boss", all) != 0;
+		b->cfg.gb_sp_turbo = geti(L"ghost_battle", L"special_turbo", all) != 0;
+		// named after the author's tests (2026-10-25); the first names (special_ghost / _type4 / _type6) still read
+		b->cfg.gb_sp_heist = geti(L"ghost_battle", L"special_heist", geti(L"ghost_battle", L"special_ghost", all)) != 0;
+		b->cfg.gb_sp_double = geti(L"ghost_battle", L"special_double_damage", geti(L"ghost_battle", L"special_type4", all)) != 0;
+		b->cfg.gb_sp_juggle = geti(L"ghost_battle", L"special_aerial_juggle", geti(L"ghost_battle", L"special_type6", all)) != 0;
+		b->cfg.gb_force_special = std::clamp(geti(L"ghost_battle", L"force_special", 0), 0, 7); // dev test
+		b->cfg.gb_costume_watch_char = geti(L"ghost_battle", L"costume_watch_char", -1); // dev recon
+	}
+	// costumes 0-3 (2026-10-19, 3 = with presets 2026-10-24); an older ini's default_costumes=1 meant 1P costumes only
+	b->cfg.gb_costume_test = std::clamp(geti(L"ghost_battle", L"costume_test", 0), 0, 7);
+	b->cfg.gb_costumes = std::clamp(geti(L"ghost_battle", L"costumes", geti(L"ghost_battle", L"default_costumes", 0) ? 1 : 0), 0, 7);
+	b->cfg.gb_custom_slot = std::clamp(geti(L"ghost_battle", L"custom_slot", 0), 0, 10); // 2026-10-25, 0 = any
 	b->cfg.gb_random_player = geti(L"ghost_battle", L"random_player", 0) != 0;
 	b->cfg.gb_end_menu = geti(L"ghost_battle", L"end_menu", 1) != 0;
 	b->cfg.gb_native_menu = geti(L"ghost_battle", L"native_menu", 1) != 0;
 	b->cfg.gb_rename = geti(L"ghost_battle", L"rename", 1) != 0;
 	b->cfg.gb_hide_chests = geti(L"ghost_battle", L"hide_chests", 1) != 0;
 	b->cfg.mod_no_rage = geti(L"modifiers", L"no_rage", 0) != 0;
+	b->cfg.mod_health = std::clamp(geti(L"modifiers", L"health", 100), 25, 500);
+	b->cfg.mod_no_pc = geti(L"modifiers", L"no_power_crush", 0) != 0;
+	b->cfg.mod_no_screw = geti(L"modifiers", L"no_screw", 0) != 0;
 
 	// profiles/index.txt lists "<char> <name> <frames>" best-first; [profiles] c<char>=<name> overrides
 	const std::wstring dir = g_dir + L"profiles/";
@@ -719,8 +735,106 @@ int ai_side(const ghost::Settings &cfg)
 // Game Modifiers: offline battles only (game mode 2: Practice, VS, Arcade, Treasure / Ghost Battle - never
 // online or replays). The settings are latched when a battle starts, so a change applies from the next match.
 // Runs on the game thread, once per player per frame (decode_hook).
-struct Mods { bool no_rage = false; } g_mods;
+struct Mods { bool no_rage = false, no_pc = false, no_screw = false; int health = 100; } g_mods;
+
+// Health multiplier (2026-10-25, a write watch on the health percent +0x1508: exe+0x742C70 computes it every
+// frame as current * 100 / max). The health object is at player +0x14E0: max health at +0x14FC (16.16 fixed,
+// 175.0; +0x14F8 and +0x1500 hold the same), current health ENCODED - check dword +0x14E8 with key qword
+// +0x14F0, value = 0x255A60(check, key) (0 if the check fails = a KO), new check = 0x2D0EA0(value, key).
+// We scale the max copies and keep the current health in step: whenever the game (re)sets the max (a new
+// match / round) and whenever the health goes UP (round start, Practice refill), it becomes the scaled max.
+constexpr uintptr_t kHealth = 0x14E0, kFnDecodeInt = 0x255A60, kFnEncodeInt = 0x2D0EA0;
+struct HealthState { int32_t base = 0, target = 0, last = 0; } g_health[2];
+int32_t health_get(uintptr_t p)
+{
+	uint32_t chk = 0;
+	uint64_t key = 0;
+	if (!t7::rd(p + kHealth + 8, chk) || !t7::rd(p + kHealth + 0x10, key))
+		return 0;
+	return reinterpret_cast<int32_t(__fastcall *)(uint32_t, uint64_t)>(t7::exe_base() + kFnDecodeInt)(chk, key);
+}
+void health_set(uintptr_t p, int32_t v)
+{
+	uint64_t key = 0;
+	if (!t7::rd(p + kHealth + 0x10, key))
+		return;
+	const uint32_t chk = reinterpret_cast<uint32_t(__fastcall *)(int32_t, uint64_t)>(t7::exe_base() + kFnEncodeInt)(v, key);
+	*reinterpret_cast<volatile uint32_t *>(p + kHealth + 8) = chk;
+}
+void health_tick(uintptr_t p, int idx, int pct)
+{
+	HealthState &st = g_health[idx];
+	int32_t mx = 0;
+	if (!t7::rd(p + 0x14FC, mx) || mx <= 0)
+		return;
+	if (pct == 100 && (st.target == 0 || mx == st.base))
+	{
+		st = {}; // off (and nothing of ours left to undo)
+		return;
+	}
+	const int32_t cur = health_get(p);
+	if (mx != st.target)
+	{
+		// the game set the max (new match / round, or our first frame): scale it
+		st.base = mx, st.target = int32_t(int64_t(mx) * pct / 100);
+		for (const uintptr_t o : { 0x14F8, 0x14FC, 0x1500 })
+			*reinterpret_cast<volatile int32_t *>(p + o) = st.target;
+		if (cur >= st.base)
+			health_set(p, st.target);
+		logf("mods: health P%d: max %d -> %d (x%d%%), current %d -> %d", idx + 1, st.base >> 16, st.target >> 16, pct, cur >> 16,
+			health_get(p) >> 16);
+		st.last = health_get(p);
+		if (pct == 100)
+			st = {};
+		return;
+	}
+	if (cur > st.last && cur < st.target)
+	{
+		// health went up (a new round, a Practice refill): to the scaled max
+		health_set(p, st.target);
+		logf("mods: health P%d: refill %d -> %d", idx + 1, cur >> 16, st.target >> 16);
+	}
+	st.last = health_get(p);
+}
 std::atomic<bool> g_mods_relatch{ false }; // a new match without leaving the mode (Ghost Battle's next fight)
+// No Power Crush: the two power crush property cases (exe+0x71D10F / 0x71D15A: mov byte [rcx+0x6C0], al) don't
+// set the armor flag at all while the modifier is on - patched only in offline battles (game mode 2), restored the
+// first frame of anything else (online included). Runs on the game thread (mods_tick), the thread that runs it.
+void pc_patch(bool on)
+{
+	// the two power crush cases of the move property switch (variant 1 at 0x71D0F4, variant 2 at 0x71D14C): their
+	// armor flag writes out. (Their +0x6C1 / +0x6C8 flags were not the smoke - that is property 0x8046, skipped
+	// in gb::propexec_hook.)
+	struct Patch { uintptr_t at; uint8_t orig[6], repl[6]; size_t n; };
+	static const Patch patches[] = {
+		{ 0x71D10F, { 0x88, 0x81, 0xC0, 0x06, 0x00, 0x00 }, { 0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00 }, 6 }, // mov [rcx+0x6C0], al
+		{ 0x71D15A, { 0x88, 0x81, 0xC0, 0x06, 0x00, 0x00 }, { 0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00 }, 6 }, // mov [rcx+0x6C0], al
+	};
+	static bool patched = false, failed = false;
+	if (on == patched || failed)
+		return;
+	for (const Patch &pt : patches)
+		if (std::memcmp(reinterpret_cast<void *>(t7::exe_base() + pt.at), patched ? pt.repl : pt.orig, pt.n) != 0)
+		{
+			failed = true;
+			logf("mods: no power crush: unexpected code at exe+0x%llX, effect patch off", (unsigned long long)pt.at);
+			return;
+		}
+	for (const Patch &pt : patches)
+	{
+		void *code = reinterpret_cast<void *>(t7::exe_base() + pt.at);
+		DWORD old = 0;
+		if (VirtualProtect(code, pt.n, PAGE_EXECUTE_READWRITE, &old))
+		{
+			std::memcpy(code, on ? pt.repl : pt.orig, pt.n);
+			VirtualProtect(code, pt.n, old, &old);
+		}
+	}
+	FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void *>(t7::exe_base() + 0x71D100), 0x80);
+	patched = on;
+	logf("mods: no power crush: armor flag code %s", on ? "patched" : "restored");
+}
+
 void mods_tick(uintptr_t p, int idx, const ghost::Brain *b)
 {
 	static int prev_mode = -1;
@@ -744,6 +858,12 @@ void mods_tick(uintptr_t p, int idx, const ghost::Brain *b)
 	{
 		const Mods was = g_mods;
 		g_mods.no_rage = b->cfg.mod_no_rage;
+		g_mods.health = b->cfg.mod_health;
+		g_mods.no_pc = b->cfg.mod_no_pc;
+		g_mods.no_screw = b->cfg.mod_no_screw;
+		if (was.no_screw && !g_mods.no_screw)
+			for (const uintptr_t pl : { t7::exe_base() + t7::kLiveP1, t7::exe_base() + t7::kLiveP2 })
+				*reinterpret_cast<volatile int32_t *>(pl + 0xB08) = 0; // screws back: clear our "screw used" mark
 		if (was.no_rage && !g_mods.no_rage)
 			for (const uintptr_t pl : { t7::exe_base() + t7::kLiveP1, t7::exe_base() + t7::kLiveP2 })
 			{
@@ -751,10 +871,64 @@ void mods_tick(uintptr_t p, int idx, const ghost::Brain *b)
 				if (t7::rd(pl + 0x757, f) && (f & 4))
 					*reinterpret_cast<volatile uint8_t *>(pl + 0x757) = uint8_t(f & ~4);
 			}
-		logf("mods: new match: no rage %s", g_mods.no_rage ? "on" : "off");
+		logf("mods: new match: no rage %s, health %d%%, no power crush %s, no screw %s", g_mods.no_rage ? "on" : "off", g_mods.health,
+			g_mods.no_pc ? "on" : "off", g_mods.no_screw ? "on" : "off");
 	}
+	pc_patch(mode == t7::kModePractice && g_mods.no_pc);
+#ifndef T7_PUBLIC
+	// No Screw recon (2026-10-25): costume_watch_char=800 - record P2's whole player block (0x3670) every frame
+	// with P1's move id, for 2 minutes (frames_p2.bin: per frame u32 n, i32 p1 move, i32 p2 move, block)
+	if (idx == 1 && b && b->cfg.gb_costume_watch_char == 800 && mode == t7::kModePractice)
+	{
+		static FILE *rec = nullptr;
+		static uint32_t n = 0;
+		if (!rec && n == 0)
+		{
+			_wfopen_s(&rec, (g_dir + L"frames_p2.bin").c_str(), L"wb");
+			logf("screw recon: recording P2 frames");
+		}
+		if (rec)
+		{
+			static uint8_t blk[0x3670];
+			int32_t m1 = -1, m2 = -1;
+			t7::rd(t7::exe_base() + t7::kLiveP1 + 0x350, m1), t7::rd(p + 0x350, m2);
+			if (t7::safe_copy(blk, p, sizeof blk))
+			{
+				fwrite(&n, 4, 1, rec), fwrite(&m1, 4, 1, rec), fwrite(&m2, 4, 1, rec), fwrite(blk, 1, sizeof blk, rec);
+				++n;
+			}
+			if (n >= 60 * 120)
+				fclose(rec), rec = nullptr, logf("screw recon: %u frames recorded", n);
+		}
+	}
+#endif
 	if (mode != t7::kModePractice)
 		return;
+	health_tick(p, idx, g_mods.health);
+	if (g_mods.no_screw)
+	{
+		// screw (2026-10-25, every-frame recording of P2 through screw / no-screw combos): +0xB08 = -1 from the screw hit until
+		// the victim gets up (0 again at the wake-up reaction 32774); a second screw in the same combo gives a
+		// normal juggle reaction. Keep it at -1: every screw hit acts like a combo's second one.
+		int32_t used = 0;
+		if (t7::rd(p + 0xB08, used) && used == 0)
+			*reinterpret_cast<volatile int32_t *>(p + 0xB08) = -1;
+	}
+	if (g_mods.no_pc)
+	{
+		// power crush (2026-10-25): the move property handler (exe+0x71D0F0..) sets +0x6C0 = the armor flag (byte)
+		// and +0x6C4 = the damage percent taken while armored (100; exe+0x7506BA: damage * it / 100, min 1 - zeroing
+		// it made armored hits do 1 damage, author's test). Clear the flag, keep the damage.
+		static int32_t logged_move[2] = { -1, -1 };
+		uint8_t armor = 0;
+		int32_t mv = 0;
+		if (t7::rd(p + 0x6C0, armor) && armor != 0)
+		{
+			*reinterpret_cast<volatile uint8_t *>(p + 0x6C0) = 0;
+			if (t7::rd(p + 0x350, mv) && mv != logged_move[idx])
+				logged_move[idx] = mv, logf("mods: no power crush: P%d move %d armor flag cleared", idx + 1, mv);
+		}
+	}
 	if (g_mods.no_rage)
 	{
 		// rage (2026-10-19, VS dumps in / out of / after rage): +0x781 = in rage (the game copies it in from
@@ -1013,6 +1187,87 @@ void dump_players()
 			logf("dump: side %d char %d costume block %08X %08X %08X %08X", s, ch, w[0], w[1], w[2], w[3]);
 		}
 	logf("dump: cfg %s, infos %s", cf ? "ok" : "FAIL", in ? "ok" : "FAIL");
+	// own-costume recon (2026-10-25): a fighter's outfit = 0x1AC bytes at costume block +0x1B4 (copied there by
+	// 0x292E30, first dword = the slot). With the player in their own custom costume, search the process for
+	// other copies of P1's block (the save data) and the exe globals that point into those allocations.
+	if (cfg)
+		for (int s = 0; s < 2; ++s)
+		{
+			std::vector<uint8_t> blk(0x1AC);
+			const uintptr_t at = cfg + gb::kCfgCostume + s * gb::kCostumeStride + 0x1B4;
+			if (!t7::safe_copy(blk.data(), at, blk.size()))
+				continue;
+			wchar_t sfx[32];
+			swprintf(sfx, 32, L"_outfit%d.bin", s);
+			dump(sfx, at, blk.size());
+			// the pattern: the block after its slot dword, if it holds anything. 0x60 bytes from +4 matched every
+			// design of a character alike (shared base pieces, 2026-10-25) - now 0x140 bytes from +0x60, one design only
+			const uint8_t *pat = blk.data() + 0x60;
+			const size_t plen = 0x140;
+			if (std::all_of(pat, pat + plen, [](uint8_t v) { return v == 0; }))
+			{
+				logf("dump: outfit side %d empty", s);
+				continue;
+			}
+			struct Hit { uintptr_t addr, base, size; };
+			std::vector<Hit> hits;
+			MEMORY_BASIC_INFORMATION mbi{};
+			std::vector<uint8_t> buf;
+			for (uintptr_t a = 0x10000; a < 0x7FFFFFFF0000ull && hits.size() < 24 && VirtualQuery(reinterpret_cast<void *>(a), &mbi, sizeof mbi);
+				 a = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize)
+			{
+				if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS)) ||
+					!(mbi.Protect & (PAGE_READWRITE | PAGE_READONLY | PAGE_WRITECOPY | PAGE_EXECUTE_READWRITE)) || mbi.RegionSize > 0x40000000)
+					continue;
+				const uintptr_t rb = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+				buf.resize(mbi.RegionSize);
+				if (!t7::safe_copy(buf.data(), rb, buf.size()))
+					continue;
+				for (auto it = buf.begin(); hits.size() < 24;)
+				{
+					it = std::search(it, buf.end(), pat, pat + plen);
+					if (it == buf.end())
+						break;
+					const uintptr_t h = rb + (it - buf.begin()) - 0x60; // the block's start (slot dword 0x60 before the pattern)
+					if (h != at)
+						hits.push_back({ h, reinterpret_cast<uintptr_t>(mbi.AllocationBase), mbi.RegionSize });
+					++it;
+				}
+			}
+			int32_t ch = -1, slot = -1;
+			t7::rd(cfg + gb::kCfgChar + s * 4, ch), t7::rd(at, slot);
+			logf("dump: outfit side %d (char %d, slot %d): %zu other copies", s, ch, slot, hits.size());
+			const uintptr_t ebase = t7::exe_base();
+			const auto *dos = reinterpret_cast<const IMAGE_DOS_HEADER *>(ebase);
+			const auto *nt = reinterpret_cast<const IMAGE_NT_HEADERS64 *>(ebase + dos->e_lfanew);
+			const size_t esize = nt->OptionalHeader.SizeOfImage;
+			int k = 0;
+			for (const Hit &h : hits)
+			{
+				uint32_t slot_here = 0;
+				t7::rd(h.addr, slot_here);
+				logf("dump:   copy %p (slot dword %u), allocation %p, region size 0x%zX", (void *)h.addr, slot_here, (void *)h.base, h.size);
+				if (k < 4)
+				{
+					wchar_t nsfx[48];
+					swprintf(nsfx, 48, L"_outfit%d_copy%d.bin", s, k);
+					const uintptr_t from = h.addr >= 0x4000 ? h.addr - 0x4000 : h.addr;
+					dump(nsfx, from, 0x8000); // 0x4000 before the copy, 0x4000 from it
+					// exe globals (8-byte values) pointing into this allocation
+					int g = 0;
+					for (uintptr_t e = ebase; e + 8 <= ebase + esize && g < 12; e += 8)
+					{
+						uintptr_t v = 0;
+						if (!t7::rd(e, v) || v < h.base || v >= h.addr + 0x10000)
+							continue;
+						logf("dump:     global exe+0x%llX -> %p (copy - 0x%llX)", (unsigned long long)(e - ebase), (void *)v,
+							(unsigned long long)(h.addr - v));
+						++g;
+					}
+				}
+				++k;
+			}
+		}
 	// list-file recon (preset costumes): globals near exe+0x34CE8A0 that are "list" objects - +0x28/+0x30
 	// = vector of loaded files, data = [[file]+0x48] (0x329170). Dump each file's data (header: +8 u16 count).
 	int lists = 0;
@@ -1120,6 +1375,11 @@ DWORD WINAPI worker(void *)
 		// dialog_watch_tick(); // done (2026-10-19): readers found; the getter hooks in menutrace.hpp log the owners
 #endif
 		g_tracer.tick();
+#ifndef T7_PUBLIC
+		if (ghost::Brain *wb = g_brain)
+			gb::slotwatch::costume_watch_tick(wb->cfg.gb_costume_watch_char);
+		gb::slotwatch::tick();
+#endif
 		if (hotkey(VK_F10)) toggle_watch();
 		if (hotkey(VK_F9))
 			g_brain = load_brain(), load_menu_key(); // old brain intentionally leaked: the game thread may still hold it
@@ -1155,6 +1415,15 @@ BOOL APIENTRY DllMain(HMODULE mod, DWORD reason, LPVOID)
 	if (reason == DLL_PROCESS_ATTACH)
 	{
 		DisableThreadLibraryCalls(mod);
+		// installed as both dinput8.dll and version.dll: only the first copy starts; an old version.dll of
+		// ours next to this dinput8.dll would run too - stay off and say so
+		if (!loader::first_in_process())
+			return TRUE;
+		if (loader::old_version_dll_next_to(mod))
+		{
+			loader::message(loader::kOldVersionDll);
+			return TRUE;
+		}
 		wchar_t path[MAX_PATH];
 		GetModuleFileNameW(mod, path, MAX_PATH);
 		g_dir = path;

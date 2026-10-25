@@ -6,9 +6,13 @@ one-time message box saying so; another one appears when the overlay can't hook 
 
 ## Loading
 
-`version.dll` in `TekkenGame/Binaries/Win64` is a proxy: it forwards all 15 exports of the system
-`version.dll` (one generic 8-argument x64 forwarder, `src/proxy_version.cpp`) and starts one worker
-thread from `DllMain`. Hooks use MinHook.
+`dinput8.dll` in `TekkenGame/Binaries/Win64` is a proxy (the game imports DINPUT8; no system DLL depends
+on it, unlike `version.dll`, which some Windows installations load from System32 first). It forwards
+the exports of the system DLL of its own file name - DirectInput8Create and the COM exports, or the 15
+exports of `version.dll` when renamed (one generic 8-argument x64 forwarder, `src/proxy_version.cpp`,
+`src/version.def`) - and starts one worker thread from `DllMain`. `src/loader.hpp` keeps one copy per
+process (`Local\t7ghost_<pid>`) and stays off with a message box when an old `version.dll` of the mod is
+next to it. Hooks use MinHook.
 
 ## Memory layout (`src/t7.hpp`)
 
@@ -106,8 +110,12 @@ online-style list `[exe+0x34CEA10]` (8 rank tiers, 0x40-byte records: `+8` chara
 applied by `exe+0x439C90`; 5 is Turbo; other types are special fights. The mod hooks both functions:
 it hands `0x439C90` a ghost whose character has a profile (character first, uniformly, then any rank),
 and after `0x439340` sets the rounds from Game Options (`[[exe+0x34CE450]+0xA1E0]`, what VS reads), a
-random stage, and optionally default costumes. Special fights off: the fight type is set to 0 before
-the call. The ghost list is rebuilt between fights, so a chosen ghost is remembered by character and
+random stage, and the Costumes option. Treasure fight types: 1/2 boss fights (Devil Kazumi and the
+special opponents), 4 Double Damage Battle, 5 Turbo Battle, 6 Aerial Juggle Battle (only juggles do
+damage), 7 Heist Battle; a kind switched off in the F1 panel is set to 0 before the call. After the
+end-of-match menu: a plain Rematch is always a regular fight, Rematch on a new stage allows only 4/5/6
+(they keep the chosen ghost), Next opponent allows every ticked kind (a boss or Heist fight first, then
+the rematch options lead to the picked opponent). The ghost list is rebuilt between fights, so a chosen ghost is remembered by character and
 name and looked up again at setup.
 
 End-of-match menu: the game's own two-option menu (Next match / Start Over, Return to Main Menu) is up
@@ -148,8 +156,9 @@ active on each damage frame. `routes_<char>.txt`, one route per line:
 (`held` = player-relative input words, `carry` = how far the opponent has travelled, in wall-map units).
 At runtime a route starts when our move is a route's launcher within 20 frames of the launch, or when we
 left the launcher for its follow-up move at most 8 frames ago (e.g. a df+2 that hands over before the
-opponent is airborne); it is timed from when the launcher began (its move timer can continue from the move
-before). Kazuya also has stun routes (starter `stun`, `combos.py --stun`): they start when our hit puts the
+opponent is airborne); it is timed from the launcher's hit (`route_frame_hit`; its move timer can continue from the move
+before). Every Ghost has routes (475 for 36 characters); King's end with his grab (`combos.py --max-gap`
+keeps a slow grab ender in the same attempt). Kazuya, Steve and Noctis also have stun routes (starter `stun`, `combos.py --stun`): they start when our hit puts the
 opponent into a crumple (simple state 12 / 13 / 15 while stunned). A hit is a change of the opponent's
 last-hit damage value; `combos.py --hp-hits` also counts a health-bar drop with an unchanged value (hits
 of equal damage in a row, e.g. Heihachi's screw into Raijin 2, 1). Combo style 1 ends it when an
@@ -190,8 +199,28 @@ ranked ghost's own), 7 and up = Preset 1.. . Which characters have 3P/4P comes f
 `customize_chara_list` (`[exe+0x34CE858]`, 24-byte entries: u8 character, u8 flag); the presets per
 character from `customize_preset_table_cs_s3` (`[exe+0x34CE898]`, 0x198-byte entries with up to 50
 preset names). List files: object +0x28 = vector of loaded files, data = `[[file]+0x48]`, data +8 = u16
-count, data +0 points to the list's own name. Presets on a ranked-ghost opponent leave Ghost Battle's
-loading screen hanging, so only 1P-4P are used.
+count, data +0 points to the list's own name.
+
+Presets (and the player's own customizations, slot 6) on the opponent used to leave Ghost Battle's
+loading screen hanging: the per-side costume routine `0x40B5D0` dressed only our side. The mod hooks it
+to dress the opponent after our side once the busy flag `[exe+0x34D5C10]+0x48` clears, and hooks
+`0x28DA90` (behind the Blueprint native GetDesiredCostumeType) to report type 0 for that side.
+
+**The player's own customizations.** `customize1/2.sav` are decrypted at boot (the save system's
+`0x3D8A60` copies each loaded file to its registered target) and stay in the customize manager
+`[exe+0x34CE668]`. `0x2F9300(mgr, -, char, slot 0-9)` returns a slot's record: `mgr + 0x1D08C +
+0x2F8E80(char)*0xFB954 + slot*0x280 + 0x2C` (character indices from 0x27 in the second half at
+`+0x2670C5C`); the word at block `+2` is the mask of saved slots (unsaved slots hold the default outfit).
+Records keep item ids; the outfit (the costume block's `+0x1B4` layout, 0x1AC bytes) keeps 11 rows of
+0x1C from `+4`: item hash `0x4AD5E0(id)`, the row's dword `+8`, 0x14 bytes of colours from `+0xC`
+(record rows are 0x20), and at `+0x138` `0x292B50()` of the record dwords `+0x160..+0x260` (without
+`+0x1E0`) - the conversion of the Practice Quick Select path `0x40BE90`, verified byte for byte against
+the game's own entries. The opponent then gets slot 6 with that outfit.
+
+Costumes option: 0 = the ranked ghosts' own outfits, 1 = 1P, 2 = 1P-4P, 3 = 1P-4P + presets, 4 = 1P-4P +
+presets + own customizations, 5 = 1P-4P + own, 6 = own only (1P-4P without one), 7 = Random (also the
+ranked ghost's own outfit). Mixed options pick a kind first, then one of it; a forced customization slot
+the character lacks falls back to a 1P-4P costume.
 
 ## Game Modifiers (`src/main.cpp` mods_tick)
 
@@ -201,9 +230,27 @@ player byte `+0x757` bit `0x4` marks rage as used for the round; it is set for b
 never grants rage (`+0x781` = in rage, `+0xC00` = the aura, synced by `0x722C60`). Clearing those two
 instead made the game start rage again every frame.
 
+**Health.** `0x742C70` writes the health percent (`+0x1508`) every frame as current * 100 / max. The
+health object is at player `+0x14E0`: max health at `+0x14FC` (16.16 fixed point, 175.0; `+0x14F8` and
+`+0x1500` hold the same), current health encoded - check dword `+0x14E8`, key qword `+0x14F0`,
+value = `0x255A60(check, key)` (0 when the check fails), new check = `0x2D0EA0(value, key)`; many game
+integers use this scheme. The mod scales the three max copies whenever the game sets them (every round
+start) and sets the current health to the new max when it was full or goes up (round start, Practice
+refill).
+
+**No Power Crush.** The power crush move property (id `0x81BD`, value `0x01640000` = on, 100% damage
+taken) sets `+0x6C0` = the armor flag (byte) and `+0x6C4` = the damage percent taken while armored
+(`0x7506BA`: damage * it / 100, minimum 1) in the property switch of `0x717750` (cases at `0x71D0F4` /
+`0x71D14C`). Their two `mov [rcx+0x6C0], al` are replaced by NOPs while the modifier is on (game mode 2
+only; restored otherwise, on the game thread), and a hook on `0x717750` skips property `0x8046` value
+`0x47` - the power crush smoke effect.
+
+**No Screw.** `+0xB08` (dword) is -1 from a screw hit until the victim gets up (0 again at the wake-up
+reaction); a second screw in the same combo gives a normal juggle reaction. The mod keeps it at -1.
+
 ## Harvesters (`src/harvest.cpp`)
 
-The recorder alone, with no hooks: replay variant (records while game mode = 3, optional
+The recorder alone, with no hooks (also named `dinput8.dll`): replay variant (records while game mode = 3, optional
 auto-navigation through the Battle Log with Ctrl+F8) and live variant (any non-replay fight; writes
 frames 6 behind the newest because online fights roll back).
 

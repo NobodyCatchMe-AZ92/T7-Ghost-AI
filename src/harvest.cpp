@@ -14,6 +14,7 @@
 // Player names are never written: name-like strings are hashed in-process with a random key that
 // stays on this PC (Win64/t7GhostHarvest_private/salt.bin - do not share that folder).
 #include "t7.hpp"
+#include "loader.hpp"
 #include "names.hpp"
 #include <share.h>
 #include <timeapi.h>
@@ -577,6 +578,15 @@ BOOL APIENTRY DllMain(HMODULE mod, DWORD reason, LPVOID)
 	if (reason == DLL_PROCESS_ATTACH)
 	{
 		DisableThreadLibraryCalls(mod);
+		// one copy per process (the mod or a harvester, under dinput8.dll or version.dll); an old
+		// version.dll of ours next to this dinput8.dll would run too - stay off and say so
+		if (!loader::first_in_process())
+			return TRUE;
+		if (loader::old_version_dll_next_to(mod))
+		{
+			loader::message(loader::kOldVersionDll);
+			return TRUE;
+		}
 		wchar_t path[MAX_PATH];
 		GetModuleFileNameW(mod, path, MAX_PATH);
 		g_win64 = path;

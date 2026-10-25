@@ -15,13 +15,13 @@ set INC=/Ithird_party\minhook\include /I%IG% /I%IG%\backends
 set LIBS=user32.lib winmm.lib bcrypt.lib d3d11.lib d3dcompiler.lib gdi32.lib dwmapi.lib
 cl /nologo /std:c++20 /O2 /MT /EHsc /W3 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX %INC% ^
    src\main.cpp src\proxy_version.cpp %OBJS% ^
-   /Fobuild\ /Fdbuild\ /Zi /LD /Fe:build\version.dll ^
+   /Fobuild\ /Fdbuild\ /Zi /LD /Fe:build\dinput8.dll ^
    /link /DEF:src\version.def /DEBUG /OPT:REF /OPT:ICF %LIBS% || exit /b 1
-echo built build\version.dll
+echo built build\dinput8.dll
 rem public build (T7_PUBLIC): AI + learning + settings panel only, no recorders/traces/dev hotkeys, no debug symbols
 if not exist build\public mkdir build\public
 cl /nologo /std:c++20 /O2 /MT /EHsc /W3 /DNDEBUG /DT7_PUBLIC /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX %INC% ^
    src\main.cpp src\proxy_version.cpp %OBJS% ^
-   /Fobuild\public\ /LD /Fe:build\public\version.dll ^
+   /Fobuild\public\ /LD /Fe:build\public\dinput8.dll ^
    /link /DEF:src\version.def /OPT:REF /OPT:ICF %LIBS% || exit /b 1
-echo built build\public\version.dll
+echo built build\public\dinput8.dll

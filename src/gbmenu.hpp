@@ -410,7 +410,7 @@ void confirm(ghost::Brain *b)
 	g_chosen = g_sel;
 	gb::Choice c;
 	if (it.action == kRematch || it.action == kRematchStage)
-		c.ch = gb::g_cur_ch, c.name = gb::g_cur_name, c.stage = it.action == kRematch ? gb::g_last_stage : -1;
+		c.ch = gb::g_cur_ch, c.name = gb::g_cur_name, c.stage = it.action == kRematch ? gb::g_last_stage : -1, c.rematch = true;
 	else if (it.action == kNext)
 		c.ch = it.ch, c.name = it.name;
 	{

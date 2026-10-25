@@ -350,7 +350,8 @@ void overlay_panel()
 	if (ImGui::CollapsingHeader("Ghost Battle Mode Settings"))
 	{
 		auto save_gb = [](const wchar_t *key, int v) { ini_set(L"ghost_battle", key, std::to_wstring(v)); };
-		bool g = c.ghost_battle, rs = c.gb_random_stage, go = c.gb_ghost_opponents, sf = c.gb_special_fights;
+		bool g = c.ghost_battle, rs = c.gb_random_stage, go = c.gb_ghost_opponents;
+		bool sb = c.gb_sp_boss, st = c.gb_sp_turbo, sg = c.gb_sp_heist, s4 = c.gb_sp_double, s6 = c.gb_sp_juggle;
 		bool rp = c.gb_random_player, em = c.gb_end_menu, rn = c.gb_rename, hc = c.gb_hide_chests, nm = c.gb_native_menu;
 		const auto row = [&](const char *label, bool &v, bool &field, const wchar_t *key, const char *text) {
 			if (ImGui::Checkbox(label, &v))
@@ -361,22 +362,46 @@ void overlay_panel()
 		ImGui::BeginDisabled(!c.ghost_battle);
 		row("Random stage", rs, c.gb_random_stage, L"random_stage", "A new random stage every match (the game normally keeps one stage for five fights).");
 		row("Only enable Ghost AI Characters", go, c.gb_ghost_opponents, L"ghost_opponents", "Only queue characters that have Ghost data. Characters without Ghost data will never appear with this option ticked.");
-		row("Special fights", sf, c.gb_special_fights, L"special_fights", "Tick to allow the special fight encounters from the vanilla Treasure Battle mode (e.g. Turbo Mode and Boss Fights). Untick to disable these fights completely.");
 		{
-			static const char *cos[] = { "Allow Customized Costumes", "1P Costumes Only", "1P, 2P, 3P, 4P Costumes Only" };
-			int v = std::clamp(c.gb_costumes, 0, 2);
+			static const char *cos[] = { "Default Treasure Battle CPU Costumes", "1P Costumes Only", "1P, 2P, 3P, 4P Costumes Only",
+				"1P-4P and Preset Costumes", "1P-4P, Preset, and Player Customizations", "1P-4P and Player Customizations",
+				"Player's Own Customizations Only", "Random" };
+			int v = std::clamp(c.gb_costumes, 0, 7);
 			ImGui::SetNextItemWidth(300 * sc);
-			if (ImGui::Combo("Costumes", &v, cos, 3))
+			if (ImGui::Combo("Costumes", &v, cos, 8))
 				c.gb_costumes = v, save_gb(L"costumes", v);
-			help(v == 0 ? "Opponents wear their ranked ghosts' own customized outfits."
+			help(v == 0 ? "Opponents wear the outfits Treasure Battle gives its CPU opponents (the ranked ghosts' customized outfits)."
 				: v == 1 ? "Every opponent wears the character's default 1P costume."
-				: "Every opponent wears a random one of the character's 1P, 2P, 3P and 4P costumes (3P and 4P only for the characters that have them).");
+				: v == 2 ? "Every opponent wears a random one of the character's 1P, 2P, 3P and 4P costumes (3P and 4P only for the characters that have them)."
+				: v == 3 ? "Every opponent wears a random one of the character's 1P-4P costumes or Preset costumes."
+				: v == 4 ? "Every opponent wears a random one of the character's 1P-4P costumes, Preset costumes or your own customizations (the ones you saved in Customization)."
+				: v == 5 ? "Every opponent wears a random one of the character's 1P-4P costumes or your own customizations (the ones you saved in Customization)."
+				: v == 6 ? "Every opponent wears one of your own customizations for that character. Characters you have none for wear a 1P-4P costume."
+				: "Anything goes: Treasure Battle's CPU outfits, 1P-4P costumes, Preset costumes and your own customizations.");
+			static const char *slots[] = { "Any", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10" };
+			int s = std::clamp(c.gb_custom_slot, 0, 10);
+			ImGui::BeginDisabled(v < 4);
+			ImGui::SetNextItemWidth(300 * sc);
+			if (ImGui::Combo("Customization slot to force on Ghosts", &s, slots, 11))
+				c.gb_custom_slot = s, save_gb(L"custom_slot", s);
+			help(s == 0 ? "Ghosts wear a random pick from any customization slot you have saved for their character."
+				: "Ghosts wear your customization from this slot. Characters without one in this slot wear a 1P-4P costume instead.");
+			ImGui::EndDisabled();
 		}
 		row("End-of-match menu", em, c.gb_end_menu, L"end_menu", "Tick to enable Ghost Battle's custom end of match menu options (choose the next opponent, rematch with same stage, rematch on new stage, etc)");
 		row("   Native look", nm, c.gb_native_menu, L"native_menu", "Show the end-of-match menu inside the game's own result window. Untick to use the overlay menu instead.");
 		row("Call it GHOST BATTLE", rn, c.gb_rename, L"rename", "The main menu calls the mode GHOST BATTLE instead of TREASURE BATTLE.");
 		row("Hide treasure chests", hc, c.gb_hide_chests, L"hide_chests", "No treasure chest icons on the match HUD (the results screen still shows your rewards).");
 		row("Random player per ghost", rp, c.gb_random_player, L"random_player", "Tick to make it so every opponent you encounter is only based on ONE ghost profile. Ticking this option makes the opponents you encounter less intelligent overall, but more unique in playstyle (e.g. you may encounter two Paul opponents who play very differently). Recommended is unticked/disabled.");
+		ImGui::TextUnformatted("Special fights (vanilla Treasure Battle encounters):");
+		help("Tick a kind to allow it; unticked kinds become regular fights. All are off by default.");
+		ImGui::Indent();
+		row("Boss fights", sb, c.gb_sp_boss, L"special_boss", "Boss fights: Devil Kazumi and the special opponents (e.g. Akuma, Jin). Can surprise you after 'Next opponent' (the rematch options then lead to the opponent you picked), never after a rematch.");
+		row("Turbo Battle", st, c.gb_sp_turbo, L"special_turbo", "Turbo Battle: a ranked ghost fight at a faster game speed.");
+		row("Heist Battle", sg, c.gb_sp_heist, L"special_heist", "Heist Battle: one of Treasure Battle's special encounters, with its own opponent.");
+		row("Double Damage Battle", s4, c.gb_sp_double, L"special_double_damage", "Double Damage Battle: a ranked ghost fight where every hit does double damage.");
+		row("Aerial Juggle Battle", s6, c.gb_sp_juggle, L"special_aerial_juggle", "Aerial Juggle Battle: a ranked ghost fight where only juggles do damage.");
+		ImGui::Unindent();
 		ImGui::EndDisabled();
 		if (gb::g_status[0])
 			ImGui::TextDisabled("%s", gb::g_status);
@@ -392,6 +417,21 @@ void overlay_panel()
 		if (ImGui::Checkbox("No Rage", &nr))
 			c.mod_no_rage = nr, save_mod(L"no_rage", nr);
 		help("Nobody gets rage: no rage damage boost, no Rage Arts or Rage Drives.");
+		bool npc = c.mod_no_pc;
+		if (ImGui::Checkbox("No Power Crush", &npc))
+			c.mod_no_pc = npc, save_mod(L"no_power_crush", npc);
+		help("Power crush moves lose their armor: they get interrupted by hits like any other move.");
+		bool nsc = c.mod_no_screw;
+		if (ImGui::Checkbox("No Screw", &nsc))
+			c.mod_no_screw = nsc, save_mod(L"no_screw", nsc);
+		help("Screw moves (the ones that spin a juggled opponent so the combo can continue) give a normal juggle hit instead.");
+		int hp = std::clamp(c.mod_health, 25, 500);
+		ImGui::SetNextItemWidth(300 * sc);
+		if (ImGui::SliderInt("Health", &hp, 25, 500, "%d%%"))
+			c.mod_health = (hp + 2) / 5 * 5;
+		if (ImGui::IsItemDeactivatedAfterEdit())
+			ini_set(L"modifiers", L"health", std::to_wstring(c.mod_health));
+		help("Both players' health bars, in percent of normal: 200% takes twice the damage to KO, 50% half. Ctrl+click to type a value.");
 		ImGui::TextDisabled("offline battles only; changes take effect from the next match");
 		ImGui::Spacing();
 	}
@@ -422,6 +462,28 @@ void overlay_panel()
 		ImGui::Spacing();
 	}
 
+	// PLEASE HELP! (author's text, 2026-10-25): asks players to send play data from the harvesters
+	if (ImGui::CollapsingHeader("PLEASE HELP!"))
+	{
+		static const char *help_text[] = {
+			"Data for nearly 20 characters is still totally missing!",
+			"Data for a further 15 characters is VERY small (only a few minutes of data gathered).",
+			"If we want to keep improving the single player experience of Tekken 7 and make the Ghost AI even more realistic, I will need YOUR help collecting play data that shows how real players use the characters in the game!",
+			"The Ghosts CANNOT WORK if they aren't fed data that teaches them how to play a character.",
+			"PLEASE HELP by gathering play data from real online matches you played (either from your 30 Replays in My Replay & Tips or just by playing real online matches like you normally would) and volunteering it by e-mailing the gathered data to me at DreamOfCasinoSoul@proton.me.",
+			"Data Harvesters for Replay and Live Match data collection have been included in the mod download .zip for this purpose. Read the provided readme instructions to use the Harvesters.",
+			"I CANNOT GATHER ENOUGH DATA ON MY OWN! Finding a match in this game is very hard now! Please help me gather the data needed to improve the Ghost AI further!",
+			"Data for the following missing characters is ESPECIALLY valuable: Kunimitsu, Zafina, Marduk, Anna, Geese, Armor King, Leroy, Fahkumram, Lidia, Master Raven, Nina, Panda, Eddy, Bob.",
+		};
+		ImGui::PushTextWrapPos(0.0f); // wrap at the window edge
+		for (const char *t : help_text)
+		{
+			ImGui::TextUnformatted(t);
+			ImGui::Spacing();
+		}
+		ImGui::PopTextWrapPos();
+	}
+
 	ImGui::Separator();
 	if (ImGui::Button("Reset to defaults"))
 	{
@@ -437,12 +499,20 @@ void overlay_panel()
 		// Ghost Battle Mode options too
 		const auto gb = [](const wchar_t *key, bool &field, bool v) { field = v, ini_set(L"ghost_battle", key, std::to_wstring(int(v))); };
 		gb(L"enabled", c.ghost_battle, d.ghost_battle), gb(L"random_stage", c.gb_random_stage, d.gb_random_stage);
-		gb(L"ghost_opponents", c.gb_ghost_opponents, d.gb_ghost_opponents), gb(L"special_fights", c.gb_special_fights, d.gb_special_fights);
+		gb(L"ghost_opponents", c.gb_ghost_opponents, d.gb_ghost_opponents);
+		gb(L"special_boss", c.gb_sp_boss, d.gb_sp_boss), gb(L"special_turbo", c.gb_sp_turbo, d.gb_sp_turbo);
+		gb(L"special_heist", c.gb_sp_heist, d.gb_sp_heist), gb(L"special_double_damage", c.gb_sp_double, d.gb_sp_double);
+		gb(L"special_aerial_juggle", c.gb_sp_juggle, d.gb_sp_juggle);
+		WritePrivateProfileStringW(L"ghost_battle", L"special_fights", nullptr, ini_path().c_str()); // drop the old single key
 		c.gb_costumes = d.gb_costumes, ini_set(L"ghost_battle", L"costumes", std::to_wstring(d.gb_costumes));
+		c.gb_custom_slot = d.gb_custom_slot, ini_set(L"ghost_battle", L"custom_slot", std::to_wstring(d.gb_custom_slot));
 		gb(L"end_menu", c.gb_end_menu, d.gb_end_menu);
 		gb(L"rename", c.gb_rename, d.gb_rename), gb(L"hide_chests", c.gb_hide_chests, d.gb_hide_chests);
 		gb(L"random_player", c.gb_random_player, d.gb_random_player), gb(L"native_menu", c.gb_native_menu, d.gb_native_menu);
 		c.mod_no_rage = d.mod_no_rage, ini_set(L"modifiers", L"no_rage", std::to_wstring(int(d.mod_no_rage)));
+		c.mod_health = d.mod_health, ini_set(L"modifiers", L"health", std::to_wstring(d.mod_health));
+		c.mod_no_pc = d.mod_no_pc, ini_set(L"modifiers", L"no_power_crush", std::to_wstring(int(d.mod_no_pc)));
+		c.mod_no_screw = d.mod_no_screw, ini_set(L"modifiers", L"no_screw", std::to_wstring(int(d.mod_no_screw)));
 	}
 	ImGui::SameLine();
 	const bool armed = GetTickCount64() < g_ov.forget_armed;

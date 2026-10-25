@@ -9,7 +9,7 @@ defaults below are written (release template).
 import configparser
 import sys
 
-VERSION = "1.0b (WIP)"  # keep in step with T7_VERSION_STR in src/main.cpp (letter = new ghost data, number = new features)
+VERSION = "1.1a"  # keep in step with T7_VERSION_STR in src/main.cpp (letter = new ghost data, number = new features)
 DOWNLOAD = "https://github.com/NobodyCatchMe-AZ92/T7-Ghost-AI"
 
 # (key, default, explanation)
@@ -38,13 +38,21 @@ UI = [
 ]
 MODS = [
     ("no_rage", "0", "1 = on, 0 = off. No Rage: nobody gets rage (no rage damage boost, Rage Arts or Rage Drives). Offline battles only, from the next match."),
+    ("no_power_crush", "0", "1 = on, 0 = off. No Power Crush: power crush moves lose their armor. Offline battles only, from the next match."),
+    ("no_screw", "0", "1 = on, 0 = off. No Screw: screw moves give a normal juggle hit instead of extending the combo. Offline battles only, from the next match."),
+    ("health", "100", "Health: both players' health bars in percent of normal (25-500; 200 = twice the damage to KO). Offline battles only, from the next match."),
 ]
 GB = [
     ("enabled", "1", "1 = on, 0 = off. Converts Treasure Battle into Ghost Battle - round counts affected by your Game Options, Random Stages every new match, and more."),
     ("random_stage", "1", "1 = on, 0 = off. A new random stage every match (the game normally keeps one stage for five fights)."),
     ("ghost_opponents", "1", "1 = on, 0 = off. Only queue characters that have Ghost data. Characters without Ghost data will never appear with this option ticked."),
-    ("special_fights", "0", "1 = on, 0 = off. Tick to allow the special fight encounters from the vanilla Treasure Battle mode (e.g. Turbo Mode and Boss Fights). Untick to disable these fights completely."),
-    ("costumes", "0", "0 = Allow Customized Costumes (the ranked ghosts' own outfits), 1 = 1P Costumes Only, 2 = 1P, 2P, 3P, 4P Costumes Only (a random one per opponent; 3P and 4P only for the characters that have them)."),
+    ("special_boss", "0", "1 = on, 0 = off. Special fights: boss encounters (Devil Kazumi and the special opponents, e.g. Akuma, Jin). Off = a regular fight instead."),
+    ("special_turbo", "0", "1 = on, 0 = off. Special fights: Turbo Battle (a ranked ghost fight at a faster game speed)."),
+    ("special_heist", "0", "1 = on, 0 = off. Special fights: Heist Battle (a special encounter with its own opponent)."),
+    ("special_double_damage", "0", "1 = on, 0 = off. Special fights: Double Damage Battle (every hit does double damage)."),
+    ("special_aerial_juggle", "0", "1 = on, 0 = off. Special fights: Aerial Juggle Battle (only juggles do damage)."),
+    ("costumes", "0", "0 = Default Treasure Battle CPU Costumes (the ranked ghosts' customized outfits), 1 = 1P Costumes Only, 2 = 1P, 2P, 3P, 4P Costumes Only (a random one per opponent; 3P and 4P only for the characters that have them), 3 = 1P-4P and Preset Costumes, 4 = 1P-4P, Preset, and Player Customizations, 5 = 1P-4P and Player Customizations, 6 = Player's Own Customizations Only (a 1P-4P costume for characters you have none for), 7 = Random (all of the above)."),
+    ("custom_slot", "0", "Customization slot to force on Ghosts (Costumes 4-7): 0 = Any (a random pick from the slots you saved for that character), 1-10 = that slot (characters without one in it wear a 1P-4P costume)."),
     ("end_menu", "1", "1 = on, 0 = off. Tick to enable Ghost Battle's custom end of match menu options (choose the next opponent, rematch with same stage, rematch on new stage, etc)"),
     ("native_menu", "1", "1 = on, 0 = off. Show the end-of-match menu inside the game's own result window. 0 = the overlay menu instead."),
     ("rename", "1", "1 = on, 0 = off. The main menu calls the mode GHOST BATTLE instead of TREASURE BATTLE."),
@@ -80,6 +88,14 @@ def main():
                 if k in cp["ghost_battle"]:
                     gb_vals[k] = cp["ghost_battle"][k]
             gbs = cp["ghost_battle"]
+            for old, new in (("special_ghost", "special_heist"), ("special_type4", "special_double_damage"),
+                             ("special_type6", "special_aerial_juggle")):  # first names of 2026-10-25
+                if old in gbs and new not in gbs:
+                    gb_vals[new] = gbs[old]
+            if "special_fights" in gbs:  # pre-1.1a: one key for every special fight
+                for k in ("special_boss", "special_turbo", "special_heist", "special_double_damage", "special_aerial_juggle"):
+                    if k not in gbs and not any(o in gbs for o in ("special_ghost", "special_type4", "special_type6")):
+                        gb_vals[k] = "1" if gbs["special_fights"].strip() == "1" else "0"
             if "default_costumes" in gbs and "costumes" not in gbs:  # pre-0.9: on = 1P costumes only
                 gb_vals["costumes"] = "1" if gbs["default_costumes"].strip() == "1" else "0"
         if cp.has_section("modifiers"):

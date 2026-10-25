@@ -22,17 +22,26 @@ your actual inputs rather than react to what it sees.
 
 Video demonstration of Katarina's Ghost AI (work in progress): https://streamable.com/447xkg
 
-### What's new in v1.0b (work in progress)
-The full list of changes in every version is in [CHANGELOG.md](CHANGELOG.md). v1.0b is not finished yet -
-this is a progress build, and more changes to the Ghosts' behaviour will follow under the same version.
+### What's new in v1.1a
+The full list of changes in every version is in [CHANGELOG.md](CHANGELOG.md).
 - **Recorded punishes for every Ghost** (36 characters, was 14), with fallbacks when a punisher won't
   reach; moves -22 or worse on block are always punished from Punishment Proficiency 20%.
-- **Combo routes for 21 characters** (was 13): Devil Jin, Feng, Ganryu, Gigas, Heihachi, Kazumi, Kazuya
-  and Negan are new; more launchers lead into recorded combos, and combos start reliably after launchers
-  that hand over into a follow-up move.
+- **Combo routes for every Ghost** (36 characters, was 13 - 475 recorded routes); combos start reliably
+  after launchers that hand over into a follow-up move, King's combos end with his grab, and Kazuya,
+  Steve and Noctis also combo after their crumple stuns.
+- **Your own customizations on Ghosts**: Ghost Battle's *Costumes* option can dress the Ghosts in the
+  costumes you saved in Customization - *1P-4P, Preset, and Player Customizations*, *1P-4P and Player
+  Customizations*, *Player's Own Customizations Only* or *Random* - with *Customization slot to force on
+  Ghosts* (Any or 1-10). Also new: *1P-4P and Preset Costumes*.
+- **Game Modifiers** (offline only, from the next match, all off by default): **No Power Crush** (no armor,
+  no smoke effect), **No Screw** (screw moves give a normal juggle hit) and a **Health** slider (25-500%).
+- **Special fights, one checkbox per kind**: Boss fights, Turbo Battle, Heist Battle, Double Damage
+  Battle and Aerial Juggle Battle - now also after the end-of-match menu.
 - **Taunts** for Heihachi and Lucky Chloe (19 characters).
-- If the mod can't start, a message box now says why (unsupported game version, or the settings panel
-  blocked by another overlay); README.txt has a Troubleshooting section.
+- **The mod file is now `dinput8.dll`** (was `version.dll`) - when updating, delete the old
+  `version.dll`. If the mod can't start, a message box now says why; README.txt has a Troubleshooting
+  section.
+- A new **PLEASE HELP!** category in the F1 panel explains how you can help the Ghosts improve.
 
 ### What's new in v1.0a
 - **Ghost AI Presets**: pick *Fair*, *Medium Challenge*, *Challenging* (default) or *Unfair* in the F1
@@ -108,6 +117,9 @@ Your data is anonymized - players are identified only by a code, never by a user
 default the mod merges all collected data for a character, no matter the player, into one big
 character profile.
 
+Data for the following missing characters is ESPECIALLY valuable: Kunimitsu, Zafina, Marduk, Anna,
+Geese, Armor King, Leroy, Fahkumram, Lidia, Master Raven, Nina, Panda, Eddy, Bob.
+
 There are two ways you can help me collect data:
 
 #### Data Collection Method 1: Replay Harvester
@@ -135,14 +147,15 @@ Available for download (see Releases):
 
 One zip with two folders - pick one:
 
-**T7 Ghost Mod 1.0b (WIP)** - the Ghost AI with every Ghost (36 characters). Drop the contents of its `Win64`
+**T7 Ghost Mod 1.1a** - the Ghost AI with every Ghost (36 characters). Drop the contents of its `Win64`
 folder into `TEKKEN 7\TekkenGame\Binaries\Win64` (next to the game exe), then play Ghost Battle (the
 reworked Treasure Battle), Arcade Battle, or Practice with the opponent set to "CPU" on "Ultra Hard".
 Press F1 to tune the Ghosts in real time. Its README.txt explains everything; CHANGELOG.md lists what
-changed.
+changed. Updating from an older version: the mod file is now `dinput8.dll` - delete the old
+`version.dll` from the Win64 folder.
 
 **Data Harvesters (for gathering and volunteering your own ghost data)** - if you want to help populate
-the character data: put a harvester's `version.dll` next to your game exe, then send me the Ghost Data
+the character data: put a harvester's `dinput8.dll` next to your game exe, then send me the Ghost Data
 folders it creates (t7GhostLIVEplayData and t7GhostReplayData). Use the Replay Harvester while you watch
 your saved replays, and the Live Harvester while you play or spectate online matches. Its README.txt
 explains everything.
@@ -164,7 +177,7 @@ Thank you!
 
 ## How it works (short)
 
-1. **Recording.** A `version.dll` proxy loaded by the game reads the game's per-frame fight state while
+1. **Recording.** A `dinput8.dll` proxy loaded by the game reads the game's per-frame fight state while
    replays play back (or while you play online, with the Live Harvester) and writes it to text files:
    moves, frame data, stun, positions, health, inputs. It only reads memory.
 2. **Profiles.** The Python pipeline in `analysis/` cuts each player's play into decisions - what they
@@ -189,11 +202,12 @@ See [docs/TECHNICAL.md](docs/TECHNICAL.md) for the memory layout, file formats, 
 
 | Path | What |
 |---|---|
-| `src/main.cpp` | the mod: loader thread, input hook, recorder, settings, hotkeys |
+| `src/main.cpp` | the mod: loader thread, input hook, recorder, settings, hotkeys, Game Modifiers |
+| `src/proxy_version.cpp`, `src/version.def`, `src/loader.hpp` | the `dinput8.dll` / `version.dll` proxy and its one-copy-per-process guard |
 | `src/brain.hpp`, `src/adapt.hpp` | the AI: profile playback, punishing, guarding, live adaptation, wall behaviour |
 | `src/walls.hpp` | wall maps: floors, wall breaks and live wall distances |
 | `src/overlay.hpp` | in-game settings panel (Dear ImGui on the game's D3D11 swap chain) |
-| `src/ghostbattle.hpp`, `src/gbmenu.hpp` | Ghost Battle Mode (Treasure Battle hooks) and its end-of-match menu |
+| `src/ghostbattle.hpp`, `src/gbmenu.hpp` | Ghost Battle Mode (Treasure Battle hooks, costumes, special fights) and its end-of-match menu |
 | `src/gbtext.hpp` | the GHOST BATTLE name on the main menu |
 | `src/menutrace.hpp` | dev-build recon tools for the game's Scaleform menus |
 | `src/harvest.cpp` | the shareable read-only harvesters (replay / live) |
@@ -210,8 +224,8 @@ See [docs/TECHNICAL.md](docs/TECHNICAL.md) for the memory layout, file formats, 
 Windows, Visual Studio 2022 (x64 tools). From the repo root:
 
 ```
-build.bat           -> build\version.dll (dev build) and build\public\version.dll (release build)
-build_harvest.bat   -> build\harvest_replay\version.dll and build\harvest_live\version.dll
+build.bat           -> build\dinput8.dll (dev build) and build\public\dinput8.dll (release build)
+build_harvest.bat   -> build\harvest_replay\dinput8.dll and build\harvest_live\dinput8.dll
 ```
 
 Profiles and maps (Python 3.12, standard library only):

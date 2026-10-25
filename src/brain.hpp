@@ -434,10 +434,26 @@ struct Settings
 	bool ghost_battle = true;   // Ghost Battle Mode: Treasure Battle with Game Options rounds (ghostbattle.hpp)
 	bool gb_random_stage = true;    //   a random stage every fight
 	bool gb_ghost_opponents = true; //   opponents with a Ghost profile
-	bool gb_special_fights = false; //   keep Treasure's special fights (Turbo etc.); off = every fight regular
-	int gb_costume_test = 0;        // dev: option 2 - 0 normal, 2 presets only (hangs), 3 force Default 3/4
+	// Treasure's special fights, per kind (2026-10-25; the old single special_fights key turns them all on):
+	// boss = fight types 1 (opponent + stage from the special list: Akuma, Jin ...) and 2 (Devil Kazumi),
+	// turbo = type 5, ghost = type 7 (a ghost from the special ghost list), type4 / type6 = the other two
+	// special rules (not identified yet). Off = that fight becomes a regular one.
+	bool gb_sp_boss = false, gb_sp_turbo = false, gb_sp_heist = false, gb_sp_double = false, gb_sp_juggle = false;
+	int gb_force_special = 0;       // dev test: force this Treasure fight type on every Ghost Battle fight (0 = off)
+	int gb_costume_watch_char = -1; // dev recon: watch writes to this character's last-picked costume entry
+	bool special_allowed(int type) const
+	{
+		// Treasure fight types (author's forced tests, 2026-10-25): 1/2 boss fights, 4 Double Damage Battle,
+		// 5 Turbo Battle, 6 Aerial Juggle Battle (only juggles do damage), 7 Heist Battle
+		return type == 1 || type == 2 ? gb_sp_boss : type == 5 ? gb_sp_turbo : type == 7 ? gb_sp_heist
+			: type == 4 ? gb_sp_double : type == 6 ? gb_sp_juggle : false;
+	}
+	int gb_costume_test = 0;        // dev: option 2 - 0 normal, 2 presets only (hangs), 3 force Default 3/4, 4/5 presets with the slot in the fight settings only / the player info only, 6 preset fix experiment, 7 the player's own custom costumes
 	int gb_costumes = 0;            // 0 = the ranked ghosts' own (customized) outfits, 1 = 1P costumes only,
-	                                //   2 = a random default preset costume (Preset 1-8) per opponent
+	                                //   2 = a random 1P-4P costume, 3 = a random 1P-4P or Preset costume per opponent,
+	                                //   4 = 1P-4P / Preset / the player's own customizations, 5 = 1P-4P / own,
+	                                //   6 = own only (1P-4P without one), 7 = Random (all of them, Treasure's outfits too)
+	int gb_custom_slot = 0;         //   the player's custom slot Ghosts wear (options 4-7): 0 = any saved one, 1-10
 	bool gb_random_player = false;  //   each ghost imitates one random recorded player (off = usual profile)
 	bool gb_end_menu = true;        //   end-of-match menu: rematch / new stage / next opponent x3 / ... (gbmenu.hpp)
 	bool gb_native_menu = true;     //   ...drawn in the game's own result window (off = the overlay)
@@ -445,6 +461,9 @@ struct Settings
 	bool gb_hide_chests = true;     //   no treasure chest icons on the match HUD (results screen keeps them)
 	// Game Modifiers (2026-10-19; offline battles only, each takes effect from the next match - mods_tick)
 	bool mod_no_rage = false;       //   nobody gets rage
+	int mod_health = 100;           //   both players' max health in percent (25-500)
+	bool mod_no_pc = false;         //   no power crush armor
+	bool mod_no_screw = false;      //   screw moves don't extend combos
 };
 
 // Ghost AI presets (F1 "Ghost AI Preset", 2026-10-19). While one is chosen the Ghost AI sliders are
@@ -1406,7 +1425,7 @@ private:
 				window = punish_window(blocked_key_, opp, my_rem);
 		}
 		// heavily minus moves (-22 or worse) are always punished perfectly, from Punishment Proficiency 20%
-		// up (author, 2026-10-20: Leo's db+4 / FC df+3 got the recorded player's little crouch kick); 0% =
+		// up (2026-10-20: heavy lows like db+4 / FC df+3 got the recorded player's little crouch kick); 0% =
 		// the player's own punishing stays as it is
 		const bool heavy = window >= kHeavyMinus && cfg.punish_skill >= kHeavyFrom;
 		if (!perfect_roll_ && !heavy)
@@ -1505,10 +1524,14 @@ private:
 	int32_t route_tried_ = -1; // our move a route was last looked up for (once per move)
 	bool route_crumple_ = false;
 	int64_t stun_frame_ = -1000;
-	static constexpr int kStunRouteChar = 9; // stun-start routes: Kazuya only (author)
+	// stun-start (crumple) routes only for the characters the author approved: Kazuya (9); Steve (10, 2026-10-24:
+	// CH df+2 -> crumple -> f,f+2, his b+2 combo to come)
+	static bool stun_route_char(int ch) { return ch == 9 || ch == 10 || ch == 44; } // + Noctis (44, 2026-10-25: b+1,2 crumple)
 	int32_t my_move_ = -1, my_prev_move_ = -1;
 	int64_t my_move_t0_ = 0, my_prev_t0_ = 0;
 	int my_age_ = 0;
+	int64_t last_hit_frame_ = -1000;
+	int32_t last_hit_move_ = -1;
 	char route_note_[200] = "";
 
 	// Our launcher, or the move it just handed over to: the opponent can show as airborne only once the
@@ -1526,6 +1549,24 @@ private:
 				return a + my_age_;
 		return r.launcher == my_prev_move_ ? int(frame_ - my_prev_t0_) : my_age_;
 	}
+	// the same, anchored on the launcher's hit: a launcher can come out with its timeline a few frames off
+	// its move id (Lili's uf+3 from a punish: every buffered move 2 f late, the free dash and f+3 at the end
+	// on time - a different dash, the f+3 whiffed, 2026-10-22). Within 4 frames of route_frame, else that.
+	int route_frame_hit(const Route &r, const Snap &me) const
+	{
+		const int t = route_frame(r, me);
+		if (r.starter == Route::kParry || r.starter == Route::kStun || last_hit_move_ != r.launcher || frame_ - last_hit_frame_ > 30)
+			return t;
+		const int next = r.moves.size() > 1 ? r.moves[1].second : 1 << 30;
+		int rec = -1; // the launcher's last hit in the recording
+		for (const auto &[f, w] : r.hits)
+			if (f < next)
+				rec = f;
+		if (rec < 0)
+			return t;
+		const int th = rec + int(frame_ - last_hit_frame_);
+		return std::abs(th - t) <= 4 ? th : t;
+	}
 
 	void route_tick(const Snap &me, const Snap &opp)
 	{
@@ -1541,6 +1582,8 @@ private:
 		route_ocls_ = oc;
 		const bool hit = opp.hp < route_hp_ || (opp.damage_taken != route_dt_ && opp.damage_taken > 0);
 		route_hp_ = opp.hp, route_dt_ = opp.damage_taken;
+		if (hit)
+			last_hit_frame_ = frame_, last_hit_move_ = me.move_id;
 		if (opp.hit == 10 || opp.hit == 11)
 			last_ch_frame_ = frame_;
 		if (route_)
@@ -1571,7 +1614,7 @@ private:
 		// a route starts when our move is its launcher, up to 20 frames into the juggle: a two-part launcher
 		// (Jin's d+3+4 = 1695 then 1697) can lift them while its first part is still out
 		const bool by_launch = oc == Cls::juggled && frame_ - launch_frame_ <= 20;
-		const bool by_stun = crumple && me.char_id == kStunRouteChar && frame_ - stun_frame_ <= 20;
+		const bool by_stun = crumple && stun_route_char(me.char_id) && frame_ - stun_frame_ <= 20;
 		if (cfg.combo_style == 0 || !(by_launch || by_stun) || me.move_id == route_tried_ ||
 			(playing_kind_ == kTaunt && !playing_.empty()))
 			return;
@@ -1590,7 +1633,7 @@ private:
 		if (c.empty())
 			return;
 		// where we are in the route: our current move's frame
-		const int t = route_frame(*c.front(), me);
+		const int t = route_frame_hit(*c.front(), me);
 		// style 1 at a wall: prefer a route that keeps them off the wall; else end before it would splat
 		float room = -1;
 		if (cfg.combo_style == 1 && wall_info.opp_back > 0)
@@ -1611,7 +1654,7 @@ private:
 		}
 		const Route *r = c[rng_() % c.size()];
 		// the chosen route's own frame for our move (routes of one launcher share it closely)
-		const int rt = route_frame(*r, me);
+		const int rt = route_frame_hit(*r, me);
 		const size_t start = size_t(r->lead + rt);
 		if (start >= r->inputs.size())
 			return;

@@ -1,4 +1,4 @@
-LIBRARY version
+LIBRARY dinput8
 EXPORTS
 	GetFileVersionInfoA=proxy_GetFileVersionInfoA @1
 	GetFileVersionInfoByHandle=proxy_GetFileVersionInfoByHandle @2
@@ -15,3 +15,9 @@ EXPORTS
 	VerInstallFileW=proxy_VerInstallFileW @13
 	VerQueryValueA=proxy_VerQueryValueA @14
 	VerQueryValueW=proxy_VerQueryValueW @15
+	DirectInput8Create=proxy_DirectInput8Create @16
+	DllCanUnloadNow=proxy_DllCanUnloadNow PRIVATE
+	DllGetClassObject=proxy_DllGetClassObject PRIVATE
+	DllRegisterServer=proxy_DllRegisterServer PRIVATE
+	DllUnregisterServer=proxy_DllUnregisterServer PRIVATE
+	GetdfDIJoystick=proxy_GetdfDIJoystick @21
