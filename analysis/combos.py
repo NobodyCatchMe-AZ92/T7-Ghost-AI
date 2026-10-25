@@ -60,8 +60,10 @@ def damage_steps(frames, side, hp_hits=False):
         d, hp = int(f[side]["damage_taken"]), int(f[side]["hp"])
         if d != last and d > 0:
             out[i] = d
-        elif hp_hits and hp < last_hp and d > 0 and not any(out[max(0, i - 3):i]):
-            out[i] = d  # same damage as the hit before; the health bar moved
+        elif hp_hits and hp < last_hp and not any(out[max(0, i - 3):i]):
+            # same damage as the hit before; the health bar moved. A throw leaves damage_taken at 0 (King's
+            # grab ender, 2026-10-22): its health drop (%) stands in for the damage
+            out[i] = d if d > 0 else last_hp - hp
         last, last_hp = d, hp
     return out
 
@@ -203,7 +205,11 @@ def main(args):
     if "--stun" in args:
         STUN_STARTS = True
         args.remove("--stun")
-    global HP_HITS
+    global HP_HITS, MAX_GAP
+    if "--max-gap" in args:  # a longer pause between two hits (King's throw ender: grab, damage ~155 f later)
+        k = args.index("--max-gap")
+        MAX_GAP = int(args[k + 1])
+        del args[k:k + 2]
     if "--hp-hits" in args:  # hits with the same damage as the one before (Heihachi's screw 6, Raijin 2 6, 1 6)
         HP_HITS = True
         args.remove("--hp-hits")

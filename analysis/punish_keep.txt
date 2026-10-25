@@ -29,3 +29,5 @@ Jack-7 low_block 11 1700       # 4 on -11 lows: 3 attempts, the third started 1 
 Bryan block 10 1768,1796         # 1,4 - his -10 punish, done twice (the 2nd attempt added an unrelated f,f+1 later) (2026-10-21)
 Alisa block 15 1565,1564 strict   # uf+4,4: short range - only from as close as the author did it; otherwise f+3,2 (2026-10-21)
 Alisa block 15 1881,1883         # f+3,2: the fallback when uf+4,4 will not reach (3 attempts; one grouped apart by a later dash)
+Alisa low_block 15 1565,1564         # uf+4,4 from crouch (after a low / a ducked high): recorded once, clean (2026-10-25)
+Alisa low_block 15 1565,1564 strict  # short range like her standing uf+4,4; otherwise ws1,2,3
