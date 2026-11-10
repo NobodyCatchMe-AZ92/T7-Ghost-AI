@@ -22,8 +22,129 @@ your actual inputs rather than react to what it sees.
 
 Video demonstration of Katarina's Ghost AI (work in progress): https://streamable.com/447xkg
 
-### What's new in v1.1a
+## HELP THE MOD IMPROVE - COLLECT GHOST DATA AND SEND IT TO ME!
+I need help collecting DATA for the AI character profiles. What I could collect by myself is still very
+limited - around 110 matches - so a lot of characters and play styles are missing from the mod.
+
+Your data is anonymized - players are identified only by a code, never by a username or Steam ID. By
+default the mod merges all collected data for a character, no matter the player, into one big
+character profile.
+
+Data for the following missing characters is ESPECIALLY valuable: Kunimitsu, Law, Anna, Geese, Leroy,
+Fahkumram, Lidia, Master Raven, Nina, Panda, Bob.
+
+There are two ways you can help me collect data:
+
+#### Data Collection Method 1: Replay Harvester
+Install the Replay Harvester DLL into your game and watch your saved replays. Press *Ctrl+F8* on the
+Battle Log with your first replay highlighted, and the harvester navigates the replay menu by itself
+and plays one replay after another (so you can walk away and grab a coffee while it runs; press
+*Ctrl+F8* again to stop it). Turn off the in-replay tips ("Recommended Combo" / "Recommended
+Punishment") first - they pause the replays. Harvested data goes into a folder next to your game exe
+called "t7GhostReplayData", which you then send to me.
+
+#### Data Collection Method 2: Live Harvester
+Install the LIVE Harvester DLL into your game and play or spectate online matches like you normally
+would. Harvested data goes into a folder next to your game exe called "t7GhostLIVEplayData", which you
+then send to me. Only human players help the Ghosts: online matches, spectating, and offline matches
+between two people are great - please **don't** send offline fights against the CPU.
+
+I did look into having people send me their Tekken 7 replay save files instead, but loading another
+account's replay saves corrupts the save data, and reading those files directly wouldn't help anyway:
+the AI needs not just the stored inputs but how the game engine reacted to them, which can only be
+observed by playing the replay back in-game.
+
+
+## DOWNLOADING AND INSTALLING
+Available for download (see Releases):
+
+One zip with two folders - pick one:
+
+**T7 Ghost Mod 1.2a** - the Ghost AI with every Ghost (40 characters). Drop the contents of its `Win64`
+folder into `TEKKEN 7\TekkenGame\Binaries\Win64` (next to the game exe), then play Ghost Battle (the
+reworked Treasure Battle), Arcade Battle, or Practice with the opponent set to "CPU" on "Ultra Hard".
+Press F1 to tune the Ghosts in real time. Its README.txt explains everything; CHANGELOG.md lists what
+changed. Updating from an older version: the mod file is now `dinput8.dll` - delete the old
+`version.dll` from the Win64 folder.
+
+**Data Harvesters (for gathering and volunteering your own ghost data)** - if you want to help populate
+the character data: put a harvester's `dinput8.dll` next to your game exe, then send me the Ghost Data
+folders it creates (t7GhostLIVEplayData and t7GhostReplayData). Use the Replay Harvester while you watch
+your saved replays, and the Live Harvester while you play or spectate online matches. Its README.txt
+explains everything.
+
+### Please send all volunteered Ghost Data to the email address: DreamOfCasinoSoul@proton.me
+
+OR upload to mediafire and send the link in this mod page's comments.
+
+**NEVER send the folder "t7GhostHarvest_private".** It holds the secret key that turns player names
+into the anonymous codes in your data - with that key, someone could check guessed names against the
+codes. The data folders themselves contain only gameplay (moves, positions, health, inputs) with
+players as codes: nothing about you, your PC or your Steam account.
+
+PLEASE HELP MAKE THIS MOD BETTER! IT DEPENDS ON BEING FED LOTS OF DATA - WHICH I CAN'T DO ALONE! We can
+improve the Tekken 7 offline experience into something truly fun, starting with this mod!
+
+Thank you!
+
+
+## How it works (short)
+
+1. **Recording.** A `dinput8.dll` proxy loaded by the game reads the game's per-frame fight state while
+   replays play back (or while you play online, with the Live Harvester) and writes it to text files:
+   moves, frame data, stun, positions, health, inputs. It only reads memory.
+2. **Profiles.** The Python pipeline in `analysis/` cuts each player's play into decisions - what they
+   did in which situation, at which distance and frame advantage, with how much life and rage - and
+   learns every move's frame data (speed, damage, reach, block and hit advantage) from the recordings.
+3. **Playing.** In Practice (opponent set to CPU on Ultra Hard), Arcade Battle and Treasure / Ghost
+   Battle, the mod takes over the CPU's controller. Each frame it sees the fight through a short reaction delay and picks the
+   recorded players' own choice for the situation - and on top: buffered punishes from learned frame
+   data, whiff punishes (dashing in when needed), juggles with the players' own combos, hit-confirms,
+   throw breaks, and what it has learned about you.
+4. **Combo routes and punishes.** Hand-made demonstrations recorded in Practice (Ctrl+F12 in the dev
+   build): `analysis/combos.py` and `analysis/punishes.py` group repeated attempts into routes and
+   punishes (kept when done 3+ times), which the Ghost replays frame by frame after a launch, or on the
+   first free frame after blocking a punishable move (Combos / Punishment Proficiency settings).
+5. **Walls.** Every stage was mapped by walking along all of its walls in Practice. The Ghost knows at
+   every moment which floor each fighter is on, which walls have been broken this round, and how far
+   each fighter's back is from a wall - and plays accordingly.
+
+See [docs/TECHNICAL.md](docs/TECHNICAL.md) for the memory layout, file formats, wall maps and pipeline.
+
+## What's new
 The full list of changes in every version is in [CHANGELOG.md](CHANGELOG.md).
+
+### What's new in v1.2a
+- **Eddy and Zafina get Ghosts** (40 characters, 77 recorded players), with recorded punishes and combo
+  routes (normal hit, counter hit, low parry) like every other Ghost - 563 combo routes in all. More Ghost
+  data for Kazumi, Negan, Shaheen, Gigas, Noctis, Devil Jin, Katarina, Asuka, Miguel, Heihachi and others.
+- **Choose a specific Opponent and Stage**: a new option in Ghost Battle's end-of-match menu opens the
+  game's own Simple Select screen - pick the Ghost to fight next (only characters with a Ghost are listed)
+  and its costume, your own character and costume, and the stage. The menu is now 5 rows (Rematch
+  < Same stage | New stage >, Next Opponent, Choose a specific Opponent and Stage, Character Select, Main Menu).
+- **Game Modifiers take effect immediately**, even mid-match (Health from the next round), and there are new ones:
+  - **No Wall Bound** - wall bound moves give a normal wall splat instead (no wall bound combos).
+  - **Backdash Distance** and **Sidestep Distance** (incl. sidewalks) - 1-200% for both players.
+  - **Camera Distance (online friendly)** - 1-200% distance of the normal battle camera; Rage Arts,
+    zoom-ins and other cinematic shots keep their framing. The camera rises a little as it zooms out, or
+    set the height yourself with *Adjust camera height independently* + **Camera Height Offset**.
+  - **Lifebar HUD X / Y / Size (online friendly)** - move the lifebar HUD (health bars, names, rage,
+    portraits, timer, round markers, ranks, title plates) and make it smaller or bigger around the screen
+    centre.
+  - The camera and lifebar HUD options only change your own screen, so they work in every mode, online
+    too. Every other modifier is offline only.
+- Fixed: the main menu sometimes still said "Treasure Battle" instead of "Ghost Battle".
+
+### What's new in v1.1b
+- **Marduk and Armor King get Ghosts** (38 characters, 70 recorded players), with recorded punishes and
+  combo routes (normal hit, counter hit, low parry) like every other Ghost - 510 combo routes in all.
+- **More Ghost data**: King (2.6 -> 38 min), Lee (6 -> 22 min), Kazuya, Negan, Alisa and Akuma gain
+  recorded players.
+- Armor King's uf+4 launch punish is only used from close enough to connect; farther away he punishes
+  with f+2,1.
+- The F1 **PLEASE HELP!** list of missing characters is up to date.
+
+### What's new in v1.1a
 - **Recorded punishes for every Ghost** (36 characters, was 14), with fallbacks when a punisher won't
   reach; moves -22 or worse on block are always punished from Punishment Proficiency 20%.
 - **Combo routes for every Ghost** (36 characters, was 13 - 475 recorded routes); combos start reliably
@@ -108,106 +229,17 @@ The full list of changes in every version is in [CHANGELOG.md](CHANGELOG.md).
 - **More data:** the profiles now come from about 110 matches (saved replays plus online matches),
   and all players of a character are merged into one big profile by default.
 
-
-## HELP THE MOD IMPROVE - COLLECT GHOST DATA AND SEND IT TO ME!
-I need help collecting DATA for the AI character profiles. What I could collect by myself is still very
-limited - around 110 matches - so a lot of characters and play styles are missing from the mod.
-
-Your data is anonymized - players are identified only by a code, never by a username or Steam ID. By
-default the mod merges all collected data for a character, no matter the player, into one big
-character profile.
-
-Data for the following missing characters is ESPECIALLY valuable: Kunimitsu, Zafina, Marduk, Anna,
-Geese, Armor King, Leroy, Fahkumram, Lidia, Master Raven, Nina, Panda, Eddy, Bob.
-
-There are two ways you can help me collect data:
-
-#### Data Collection Method 1: Replay Harvester
-Install the Replay Harvester DLL into your game and watch your saved replays. Press *Ctrl+F8* on the
-Battle Log with your first replay highlighted, and the harvester navigates the replay menu by itself
-and plays one replay after another (so you can walk away and grab a coffee while it runs; press
-*Ctrl+F8* again to stop it). Turn off the in-replay tips ("Recommended Combo" / "Recommended
-Punishment") first - they pause the replays. Harvested data goes into a folder next to your game exe
-called "t7GhostReplayData", which you then send to me.
-
-#### Data Collection Method 2: Live Harvester
-Install the LIVE Harvester DLL into your game and play or spectate online matches like you normally
-would. Harvested data goes into a folder next to your game exe called "t7GhostLIVEplayData", which you
-then send to me. Only human players help the Ghosts: online matches, spectating, and offline matches
-between two people are great - please **don't** send offline fights against the CPU.
-
-I did look into having people send me their Tekken 7 replay save files instead, but loading another
-account's replay saves corrupts the save data, and reading those files directly wouldn't help anyway:
-the AI needs not just the stored inputs but how the game engine reacted to them, which can only be
-observed by playing the replay back in-game.
-
-
-## DOWNLOADING AND INSTALLING
-Available for download (see Releases):
-
-One zip with two folders - pick one:
-
-**T7 Ghost Mod 1.1a** - the Ghost AI with every Ghost (36 characters). Drop the contents of its `Win64`
-folder into `TEKKEN 7\TekkenGame\Binaries\Win64` (next to the game exe), then play Ghost Battle (the
-reworked Treasure Battle), Arcade Battle, or Practice with the opponent set to "CPU" on "Ultra Hard".
-Press F1 to tune the Ghosts in real time. Its README.txt explains everything; CHANGELOG.md lists what
-changed. Updating from an older version: the mod file is now `dinput8.dll` - delete the old
-`version.dll` from the Win64 folder.
-
-**Data Harvesters (for gathering and volunteering your own ghost data)** - if you want to help populate
-the character data: put a harvester's `dinput8.dll` next to your game exe, then send me the Ghost Data
-folders it creates (t7GhostLIVEplayData and t7GhostReplayData). Use the Replay Harvester while you watch
-your saved replays, and the Live Harvester while you play or spectate online matches. Its README.txt
-explains everything.
-
-### Please send all volunteered Ghost Data to the email address: DreamOfCasinoSoul@proton.me
-
-OR upload to mediafire and send the link in this mod page's comments.
-
-**NEVER send the folder "t7GhostHarvest_private".** It holds the secret key that turns player names
-into the anonymous codes in your data - with that key, someone could check guessed names against the
-codes. The data folders themselves contain only gameplay (moves, positions, health, inputs) with
-players as codes: nothing about you, your PC or your Steam account.
-
-PLEASE HELP MAKE THIS MOD BETTER! IT DEPENDS ON BEING FED LOTS OF DATA - WHICH I CAN'T DO ALONE! We can
-improve the Tekken 7 offline experience into something truly fun, starting with this mod!
-
-Thank you!
-
-
-## How it works (short)
-
-1. **Recording.** A `dinput8.dll` proxy loaded by the game reads the game's per-frame fight state while
-   replays play back (or while you play online, with the Live Harvester) and writes it to text files:
-   moves, frame data, stun, positions, health, inputs. It only reads memory.
-2. **Profiles.** The Python pipeline in `analysis/` cuts each player's play into decisions - what they
-   did in which situation, at which distance and frame advantage, with how much life and rage - and
-   learns every move's frame data (speed, damage, reach, block and hit advantage) from the recordings.
-3. **Playing.** In Practice (opponent set to CPU on Ultra Hard), Arcade Battle and Treasure / Ghost
-   Battle, the mod takes over the CPU's controller. Each frame it sees the fight through a short reaction delay and picks the
-   recorded players' own choice for the situation - and on top: buffered punishes from learned frame
-   data, whiff punishes (dashing in when needed), juggles with the players' own combos, hit-confirms,
-   throw breaks, and what it has learned about you.
-4. **Combo routes and punishes.** Hand-made demonstrations recorded in Practice (Ctrl+F12 in the dev
-   build): `analysis/combos.py` and `analysis/punishes.py` group repeated attempts into routes and
-   punishes (kept when done 3+ times), which the Ghost replays frame by frame after a launch, or on the
-   first free frame after blocking a punishable move (Combos / Punishment Proficiency settings).
-5. **Walls.** Every stage was mapped by walking along all of its walls in Practice. The Ghost knows at
-   every moment which floor each fighter is on, which walls have been broken this round, and how far
-   each fighter's back is from a wall - and plays accordingly.
-
-See [docs/TECHNICAL.md](docs/TECHNICAL.md) for the memory layout, file formats, wall maps and pipeline.
-
 ## Repository layout
 
 | Path | What |
 |---|---|
-| `src/main.cpp` | the mod: loader thread, input hook, recorder, settings, hotkeys, Game Modifiers |
+| `src/main.cpp` | the mod: loader thread, input hook, recorder, settings, hotkeys, Game Modifiers (incl. camera) |
 | `src/proxy_version.cpp`, `src/version.def`, `src/loader.hpp` | the `dinput8.dll` / `version.dll` proxy and its one-copy-per-process guard |
 | `src/brain.hpp`, `src/adapt.hpp` | the AI: profile playback, punishing, guarding, live adaptation, wall behaviour |
 | `src/walls.hpp` | wall maps: floors, wall breaks and live wall distances |
 | `src/overlay.hpp` | in-game settings panel (Dear ImGui on the game's D3D11 swap chain) |
-| `src/ghostbattle.hpp`, `src/gbmenu.hpp` | Ghost Battle Mode (Treasure Battle hooks, costumes, special fights) and its end-of-match menu |
+| `src/ghostbattle.hpp`, `src/gbmenu.hpp` | Ghost Battle Mode (Treasure Battle hooks, costumes, special fights) and its end-of-match menu (incl. the Simple Select opponent / stage choice) |
+| `src/hud.hpp` | Lifebar HUD position and size |
 | `src/gbtext.hpp` | the GHOST BATTLE name on the main menu |
 | `src/menutrace.hpp` | dev-build recon tools for the game's Scaleform menus |
 | `src/harvest.cpp` | the shareable read-only harvesters (replay / live) |

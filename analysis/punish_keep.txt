@@ -31,3 +31,6 @@ Alisa block 15 1565,1564 strict   # uf+4,4: short range - only from as close as 
 Alisa block 15 1881,1883         # f+3,2: the fallback when uf+4,4 will not reach (3 attempts; one grouped apart by a later dash)
 Alisa low_block 15 1565,1564         # uf+4,4 from crouch (after a low / a ducked high): recorded once, clean (2026-10-25)
 Alisa low_block 15 1565,1564 strict  # short range like her standing uf+4,4; otherwise ws1,2,3
+Marduk low_block 15 1678 nolaunch   # ws4 on -13 lows: knocks down, nothing combos after it - not a launch (author, 2026-10-26)
+ArmorKing block 15 1516 strict=1800       # uf+4 whiffs after far pushback: only from 1.80 or closer; otherwise f+2,1 (author, 2026-10-26)
+ArmorKing low_block 15 1516 strict=1800   # uf+4 after a low: the same 1.80 limit; otherwise 4

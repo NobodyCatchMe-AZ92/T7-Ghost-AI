@@ -10,7 +10,7 @@
 namespace gbm
 {
 constexpr uintptr_t kResultMenu = 0x34D6C04, kUiState = 0x379B16C;
-enum State { kIdle, kOpen, kPress };
+enum State { kIdle, kOpen, kPress, kSimple }; // kSimple: the real Simple Select is open over the result window
 
 // Character Select straight from the result menu (2026-10-19). The pause menu's "Return to Character Select?"
 // (loc key prc_625, handler near 0x4F56A3) ends with the scene request 0x20FFB80([exe+0x34D5B58], 4) =
@@ -68,7 +68,7 @@ DWORD WINAPI xi_hook(DWORD i, XINPUT_STATE *s)
 	if (i == 0)
 		native_tick();
 	const int st = g_state;
-	if (r != ERROR_SUCCESS || !s || st == kIdle)
+	if (r != ERROR_SUCCESS || !s || st == kIdle || st == kSimple) // Simple Select reads the pads itself
 		return r;
 	bool done;
 	const WORD btn = st == kPress && int(i) == g_pad ? script_buttons(GetTickCount64(), done) : 0;
@@ -79,7 +79,7 @@ DWORD WINAPI xi_hook(DWORD i, XINPUT_STATE *s)
 }
 
 struct Item { std::string label; int action; int ch = -1; std::wstring name; std::string choice, desc; };
-enum Action { kRematch, kRematchStage, kNext, kCharSelect, kMainMenu };
+enum Action { kRematch, kRematchStage, kNext, kSpecific, kCharSelect, kMainMenu };
 std::vector<Item> g_items;
 std::atomic<int> g_sel{ 0 };
 // native look: one row per item in the game's vertical button list (the VS end-of-match menu shows 5 there,
@@ -233,9 +233,241 @@ bool native_build(uintptr_t w)
 	return ok;
 }
 
+// The real Simple Select (SW_UI_CharacterSelect_Simple, 2026-11-09 recon) over the result window. Practice opens it
+// through its CCharacterSelect owner (global exe+0x34D5B90, class vtable exe+0x27DE610 "CCharacterSelect::exec"; the
+// same object lives the whole session, also on Ghost Battle's result screen, and runs its task list there):
+// exe+0x3F25B0(owner + 0x50) makes the 0xD78-byte controller, +0x640 = 1 as Practice, then the owner waits for
+// +0x5D8 != 0 (finished) and destroys it with exe+0x556440(owner + 0x50, obj). The panels: P1 at +0x688, CPU at
+// +0xA00 (0x378 apart): +0x25C character id, +0x23C customized slot (Default 1-4, the presets, then the player's
+// customizations), +0x218 side; +0x670 = 1 when backed out with B. Game thread only.
+constexpr uintptr_t kSsCreate = 0x3F25B0, kSsDestroy = 0x556440, kCharSelectOwner = 0x34D5B90, kOwnerVtable = 0x27DE610;
+struct SsResult { int p1_char = -1, p1_slot = 0, p1_side = 0, cpu_char = -1, cpu_slot = 0, cpu_side = 0; bool cancelled = true; };
+uintptr_t g_ss_obj = 0, g_ss_owner = 0;
+bool ss_open()
+{
+	const uintptr_t base = t7::exe_base();
+	uint64_t own = 0, vt = 0;
+	if (g_ss_obj || !t7::rd(base + kCharSelectOwner, own) || !own || !t7::rd(uintptr_t(own), vt) || vt != base + kOwnerVtable)
+	{
+		logf("simple select: cannot open (open %p, owner %p)", (void *)g_ss_obj, (void *)own);
+		return false;
+	}
+	g_ss_owner = uintptr_t(own);
+	g_ss_obj = gb::fn<uintptr_t(__fastcall *)(uintptr_t)>(kSsCreate)(g_ss_owner + 0x50);
+	if (g_ss_obj)
+		*reinterpret_cast<volatile uint8_t *>(g_ss_obj + 0x640) = 1;
+	logf("simple select: opened %p", (void *)g_ss_obj);
+	return g_ss_obj != 0;
+}
+void ss_close()
+{
+	if (g_ss_obj)
+		gb::fn<void(__fastcall *)(uintptr_t, uintptr_t)>(kSsDestroy)(g_ss_owner + 0x50, g_ss_obj);
+	g_ss_obj = 0;
+}
+bool ss_poll(SsResult &r) // true once it is finished (then it is closed)
+{
+	uint8_t done = 0, cancel = 0;
+	if (!g_ss_obj || !t7::rd(g_ss_obj + 0x5D8, done) || !done)
+		return false;
+	const uintptr_t p1 = g_ss_obj + 0x688, cpu = g_ss_obj + 0xA00;
+	t7::rd(p1 + 0x25C, r.p1_char), t7::rd(p1 + 0x23C, r.p1_slot), t7::rd(p1 + 0x218, r.p1_side);
+	t7::rd(cpu + 0x25C, r.cpu_char), t7::rd(cpu + 0x23C, r.cpu_slot), t7::rd(cpu + 0x218, r.cpu_side);
+	t7::rd(g_ss_obj + 0x670, cancel);
+	r.cancelled = cancel != 0;
+	logf("simple select: %s - P1 char %d slot %d side %d, CPU char %d slot %d side %d", r.cancelled ? "backed out" : "confirmed",
+		r.p1_char, r.p1_slot, r.p1_side, r.cpu_char, r.cpu_slot, r.cpu_side);
+	ss_close();
+	return true;
+}
+
+#ifndef T7_PUBLIC
+// dev test (Ctrl+End): open it anywhere (e.g. in a fight) and log the result
+std::atomic<bool> g_ss_req{ false };
+bool g_ss_test = false;
+void ss_test_tick()
+{
+	if (g_ss_req.exchange(false) && !g_ss_obj)
+		g_ss_test = ss_open();
+	SsResult r;
+	if (g_ss_test && ss_poll(r))
+		g_ss_test = false;
+}
+#endif
+
+// The Stage row (2026-11-09): Simple Select's value rows are text variables - $OptionName_L0-2 / R0-2 (labels) and
+// $OptionValue_L0-2 / R0-2 (values); rows 3-4 are commands only ($Command_L3 "Controller Setup", $Command_L4,
+// $Command_R3), so a value row for the stage can only be one of rows 0-2. The CPU's row 2 (Side) is free: the game
+// mirrors it from the player's side anyway (author's alternative). exe+0x47C5F0(obj, panel) refreshes a panel's side
+// text when +0x8A0 changed (shown copy +0x8A4; $OptionValue_L2/R2 from keys chasel_msg_012/013) and mirrors the
+// other panel. Hooked: on our Simple Select, CPU panel, cursor on row 2 (+0x200), it undoes the flip and steps the
+// stage instead; the row's texts are rewritten every frame while it is open (simple_tick).
+struct StageEntry { int id; const char *name; };
+constexpr StageEntry kStageMenu[] = { { -1, "Random" }, { 0, "Mishima Dojo" }, { 1, "Forgotten Realm" }, { 2, "Jungle Outpost (evening)" },
+	{ 3, "Arctic Snowfall" }, { 4, "Twilight Conflict (day)" }, { 5, "Dragon's Nest" }, { 6, "Souq" }, { 7, "Devil's Pit" },
+	{ 8, "Mishima Building" }, { 9, "Abandoned Temple" }, { 30, "Duomo di Sirio" }, { 31, "Arena" }, { 32, "G Corp Helipad (day)" },
+	{ 33, "G Corp Helipad (night)" }, { 35, "Brimstone and Fire" }, { 36, "Precipice of Fate" }, { 37, "Violet Systems" },
+	{ 39, "Kinder Gym" }, { 40, "Infinite Azure" }, { 41, "Geometric Plane" }, { 51, "Howard Estate" }, { 52, "Hammerhead" },
+	{ 55, "Infinite Azure (night)" }, { 56, "Last Day on Earth" }, { 57, "Cave of Enlightenment" }, { 58, "Vermillion Gates" },
+	{ 59, "Island Paradise" } };
+int g_ss_stage = 0; // index into kStageMenu (game thread)
+using SideRefreshFn = void(__fastcall *)(uintptr_t, int);
+SideRefreshFn g_side_refresh_orig = nullptr;
+void __fastcall side_refresh_hook(uintptr_t obj, int panel)
+{
+	int32_t cursor = -1, side = 0, shown = 0;
+	if (obj && obj == g_ss_obj && panel == 1 && t7::rd(obj + 0xA00 + 0x200, cursor) && cursor == 2 &&
+		t7::rd(obj + 0xA00 + 0x218, side) && t7::rd(obj + 0xA00 + 0x21C, shown) && side != shown)
+	{
+		*reinterpret_cast<volatile int32_t *>(obj + 0xA00 + 0x218) = shown; // no side change: the stage instead
+		bool left = false;
+		for (DWORD i = 0; i < 4; ++i)
+		{
+			XINPUT_STATE xs{};
+			if (g_xi_orig && g_xi_orig(i, &xs) == ERROR_SUCCESS)
+				left |= (xs.Gamepad.wButtons & XINPUT_GAMEPAD_DPAD_LEFT) || xs.Gamepad.sThumbLX < -16000;
+		}
+		left |= (GetAsyncKeyState(VK_LEFT) & 0x8000) != 0;
+		const int n = int(std::size(kStageMenu));
+		g_ss_stage = (g_ss_stage + (left ? n - 1 : 1)) % n;
+		logf("simple select: stage %s", kStageMenu[g_ss_stage].name);
+		return;
+	}
+	g_side_refresh_orig(obj, panel);
+}
+// Ghost characters only in the CPU's Character row (author's design). exe+0x47C010(obj, panel) refreshes a panel's
+// character when its list position (+0x220) differs from the shown one (+0x224): the list is a map at obj+0x678
+// (size obj+0x680), exe+0x476580(map, &iterator, &position) finds the entry, its +0x28 = character id; then the name
+// text, +0x25C and the costume slot. The row's left / right only moves the position, so before the refresh the
+// position keeps stepping the same way (wrapping) to the next character with a Ghost profile. P1 is not limited.
+int ss_char_at(uintptr_t obj, int pos)
+{
+	uintptr_t it[2] = {}, head = 0, node = 0;
+	int32_t key = pos, ch = -1;
+	gb::fn<void(__fastcall *)(uintptr_t, uintptr_t *, int32_t *)>(0x476580)(obj + 0x678, it, &key);
+	node = it[0];
+	t7::rd(obj + 0x678, head);
+	return node && node != head && t7::rd(node + 0x28, ch) ? ch : -1;
+}
+using CharRefreshFn = void(__fastcall *)(uintptr_t, int);
+CharRefreshFn g_char_refresh_orig = nullptr;
+void __fastcall char_refresh_hook(uintptr_t obj, int panel)
+{
+	const ghost::Brain *b = g_brain;
+	int32_t pos = 0, shown = 0;
+	uint64_t count = 0;
+	const uintptr_t p = obj + 0xA00;
+	if (b && !b->profiles.empty() && obj && obj == g_ss_obj && panel == 1 && t7::rd(p + 0x220, pos) && t7::rd(p + 0x224, shown) &&
+		pos != shown && t7::rd(obj + 0x680, count) && count > 0 && count < 256)
+	{
+		const int n = int(count);
+		int step = pos - shown;
+		step = (step == 1 || step < -1) ? 1 : -1; // +1, or a wrap from the end to the start = right
+		int k = 0;
+		const int asked = pos;
+		while (k++ < n && !b->profiles.count(ss_char_at(obj, pos)))
+			pos = (pos + step + n) % n;
+		*reinterpret_cast<volatile int32_t *>(p + 0x220) = pos;
+		if (pos != asked)
+			logf("simple select: CPU list position %d (char %d) -> %d (char %d, a Ghost)", asked, ss_char_at(obj, asked), pos, ss_char_at(obj, pos));
+	}
+	g_char_refresh_orig(obj, panel);
+}
+
+void ss_stage_texts() // game thread: the CPU's row 2 shows the stage
+{
+	uintptr_t w = 0;
+	if (!g_ss_obj || !t7::rd(g_ss_obj + 0x40, w) || !w)
+		return;
+	auto set = [&](const char *var, const char *text) {
+		gb::fn<void(__fastcall *)(uintptr_t, const char *, const char *, const char *, bool, bool, int)>(kSetTextVar)(
+			w, var, lang_code(), text, false, false, 0x400);
+	};
+	set("$OptionName_R2", "Stage");
+	set("$OptionValue_R2", kStageMenu[g_ss_stage].name);
+}
+
+// "Choose a specific Opponent and Stage" (author's design, v1.2a): Simple Select opens over the result window; the
+// pads go to it (xi_hook passes them through) and the window's input waits (its timer +0xC8 > 0 skips its input,
+// see exe+0x49D1E3). Confirm: the CPU panel's character and costume become the next fight (a regular fight), then
+// the window's own "next match" is pressed; Back: the end-of-match menu again. The P1 panel needs nothing from us:
+// Simple Select writes it into the next fight's settings itself (test 2026-11-09: Kazuya -> Leo in a custom slot).
+std::atomic<bool> g_ss_want{ false };
+void press(std::vector<Step> script, int st);
+void simple_tick() // game thread, while g_state == kSimple
+{
+	const uintptr_t d = g_dialog;
+	if (t7::read_global(kResultMenu) == 0)
+	{
+		ss_close();
+		g_state = kIdle;
+		logf("simple select: the result window closed - closed it too");
+		return;
+	}
+	const uintptr_t w = dlg_wrapper();
+	if (g_ss_want.exchange(false))
+	{
+		if (!ss_open())
+		{
+			g_state = kOpen, g_armed = false;
+			return;
+		}
+		g_ss_stage = 0; // Random
+		// Simple Select draws behind the result window (author's test): hide the window meanwhile - "Off" on its
+		// window area, as the game does when it closes it
+		if (w)
+			play_at(w, "_root.WindowArea_mc", "Off");
+	}
+	if (d)
+		*reinterpret_cast<volatile double *>(d + 0xC8) = 0.5; // the window ignores the pads meanwhile
+	ss_stage_texts();
+	SsResult r;
+	if (!ss_poll(r))
+		return;
+	if (d)
+		*reinterpret_cast<volatile double *>(d + 0xC8) = 0.0;
+	if (r.cancelled || r.cpu_char < 0)
+	{
+		// back to the end-of-match menu: the window comes back with our rows (as when it first opened)
+		ghost::Brain *nb = g_brain;
+		if (w && nb && nb->cfg.gb_native_menu)
+			g_built = native_build(w), g_built_seq = g_cursor_seq, g_shown = -1;
+		else if (w) // overlay mode: just the game's own window back under the overlay
+			gb::fn<void(__fastcall *)(uintptr_t, const char *, const char *)>(kGotoPlay)(w, "_root.WindowArea_mc", "Start");
+		g_state = kOpen, g_armed = false;
+		return;
+	}
+	gb::Choice c;
+	c.ch = r.cpu_char, c.exact = true;
+	if (ghost::Brain *b = g_brain)
+	{
+		auto by_char = gb::ghosts_by_char(b);
+		if (const auto it = by_char.find(c.ch); it != by_char.end() && !it->second.empty())
+			c.name = gb::ghost_name(it->second[gb::g_rng() % it->second.size()]);
+	}
+	gb::ss_costume(c.ch, r.cpu_slot, c.costume, c.own);
+	c.stage = kStageMenu[g_ss_stage].id; // -1 = Random (the usual random stage)
+	c.my_ch = r.p1_char;
+	if (r.p1_char >= 0)
+		gb::ss_costume(r.p1_char, r.p1_slot, c.my_costume, c.my_own);
+	{
+		std::lock_guard lk(gb::g_choice_mx);
+		gb::g_choice = c;
+	}
+	logf("simple select: next fight vs char %d (%s), costume slot %d, custom slot %d, stage %d", c.ch, c.name.empty() ? "no ranked ghost" : "a ranked ghost",
+		c.costume, c.own, c.stage);
+	press({ { 0, 150 }, { XINPUT_GAMEPAD_A, 120 }, { 0, 300 } }, kPress);
+}
+
 // game thread, once per XInput poll of pad 0
 void native_tick()
 {
+	hud::tick();
+#ifndef T7_PUBLIC
+	ss_test_tick();
+#endif
+	if (g_state == kSimple)
+		return simple_tick();
 	ghost::Brain *b = g_brain;
 	const int st = g_state;
 	if (!b || !b->cfg.gb_native_menu || (st != kOpen && st != kPress))
@@ -288,6 +520,7 @@ std::string char_name(ghost::Brain *b, int ch)
 std::mutex g_open_mx;
 bool try_open(ghost::Brain *b); // open() once per result window, from whichever thread sees it first
 
+void make_rows(); // the rows from g_items
 void open(ghost::Brain *b)
 {
 	g_items.clear();
@@ -304,39 +537,45 @@ void open(ghost::Brain *b)
 	for (size_t i = 0; i < chars.size() && i < 3; ++i)
 	{
 		const auto &v = by_char[chars[i]];
-		g_items.push_back({ "Next opponent:  " + char_name(b, chars[i]), kNext, chars[i], gb::ghost_name(v[gb::g_rng() % v.size()]), char_name(b, chars[i]) });
+		g_items.push_back({ "Next Opponent:  " + char_name(b, chars[i]), kNext, chars[i], gb::ghost_name(v[gb::g_rng() % v.size()]), char_name(b, chars[i]) });
 	}
+	g_items.push_back({ "Choose a specific Opponent and Stage", kSpecific, -1, {}, "Specific" });
 	g_items.push_back({ "Return to Character Select", kCharSelect, -1, {}, "Character Select" });
 	g_items.push_back({ "Return to Main Menu", kMainMenu, -1, {}, "Main Menu" });
 	for (Item &it : g_items) // the native window's description line (as the VS menu's)
 		it.desc = it.action == kRematch ? "Fight the same opponent again on the same stage."
 			: it.action == kRematchStage ? "Fight the same opponent again on a new stage."
 			: it.action == kNext ? "Fight " + it.choice + " next."
+			: it.action == kSpecific ? "Choose the next opponent, costumes and stage yourself."
 			: it.action == kCharSelect ? "Return to the Character Select screen."
 			: "Quit Ghost Battle and return to the Main Menu.";
-	// 5 rows as the VS end-of-match menu (5 big buttons proven; 7 crashed the game, test 2026-10-19):
-	// Rematch, Rematch on a new stage, Next opponent < x > (left/right), Character Select, Main Menu
-	g_rows.clear();
-	g_rows.push_back({ g_items[0].label, { 0 } });
-	g_rows.push_back({ g_items[1].label, { 1 } });
-	if (g_items.size() > 4)
-	{
-		Row next{ "Next opponent", {} };
-		for (int i = 2; i < int(g_items.size()) - 2; ++i)
-			next.items.push_back(i);
-		g_rows.push_back(next);
-	}
-	g_rows.push_back({ g_items[g_items.size() - 2].label, { int(g_items.size()) - 2 } });
-	g_rows.push_back({ g_items[g_items.size() - 1].label, { int(g_items.size()) - 1 } });
-	if (int(g_rows.size()) > kMaxRows)
-		g_rows.resize(kMaxRows);
+	make_rows();
 	g_row = 0;
 	for (auto &x : g_sub)
 		x = 0;
 	g_sel = 0, g_chosen = -1, g_armed = false;
 	g_open_t = GetTickCount64();
 	g_state = kOpen;
-	logf("gbm: end-of-match menu open (%zu next opponents)", std::min<size_t>(chars.size(), 3));
+	logf("gbm: end-of-match menu open (%zu next opponents, %zu rows)", std::min<size_t>(chars.size(), 3), g_rows.size());
+}
+
+void make_rows()
+{
+	// 5 rows (author's choice, 2026-11-09; 6 separate rows worked too - the window has Button_L5): Rematch < Same
+	// stage | New stage >, Next Opponent < x >, Choose a specific Opponent and Stage, Character Select, Main Menu
+	g_rows.clear();
+	for (int i = 0; i < int(g_items.size()); ++i)
+	{
+		const Item &it = g_items[i];
+		if (it.action == kRematchStage)
+			g_rows.back().items.push_back(i), g_rows.back().title = "Rematch";
+		else if (it.action == kNext && !g_rows.empty() && g_items[g_rows.back().items[0]].action == kNext)
+			g_rows.back().items.push_back(i);
+		else
+			g_rows.push_back({ it.action == kNext ? "Next Opponent" : it.label, { i } });
+	}
+	if (int(g_rows.size()) > kMaxRows)
+		g_rows.resize(kMaxRows);
 }
 
 bool try_open(ghost::Brain *b)
@@ -407,6 +646,13 @@ void press(std::vector<Step> script, int st)
 void confirm(ghost::Brain *b)
 {
 	const Item &it = g_items[g_sel];
+	if (it.action == kSpecific)
+	{
+		logf("gbm: chose \"%s\" - opening Simple Select", it.label.c_str());
+		g_ss_want = true;
+		g_state = kSimple;
+		return;
+	}
 	g_chosen = g_sel;
 	gb::Choice c;
 	if (it.action == kRematch || it.action == kRematchStage)
@@ -515,6 +761,8 @@ bool tick()
 			g_prev_up = up, g_prev_down = down, g_prev_left = left, g_prev_right = right, g_prev_ok = ok;
 		}
 		break;
+	case kSimple: // the game thread runs it (simple_tick) and closes it if the result window goes away
+		break;
 	case kPress:
 		script_buttons(now, done);
 		if (done)
@@ -607,6 +855,16 @@ void install_native()
 	if (std::memcmp(sc, spro, sizeof spro) != 0 || MH_CreateHook(sc, reinterpret_cast<void *>(&scene_hook), reinterpret_cast<void **>(&g_scene_orig)) != MH_OK ||
 		MH_EnableHook(sc) != MH_OK)
 		logf("gbm: scene request hook failed (Character Select falls back to the main menu)");
+	static const uint8_t rpro[] = { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18 };
+	auto *rf = reinterpret_cast<void *>(t7::exe_base() + 0x47C5F0);
+	if (std::memcmp(rf, rpro, sizeof rpro) != 0 || MH_CreateHook(rf, reinterpret_cast<void *>(&side_refresh_hook),
+		reinterpret_cast<void **>(&g_side_refresh_orig)) != MH_OK || MH_EnableHook(rf) != MH_OK)
+		logf("gbm: Simple Select side hook failed (no Stage row)");
+	static const uint8_t cpro[] = { 0x48, 0x89, 0x6C, 0x24, 0x10, 0x48, 0x89, 0x74, 0x24, 0x18, 0x48, 0x89, 0x7C, 0x24, 0x20 };
+	auto *cf = reinterpret_cast<void *>(t7::exe_base() + 0x47C010);
+	if (std::memcmp(cf, cpro, sizeof cpro) != 0 || MH_CreateHook(cf, reinterpret_cast<void *>(&char_refresh_hook),
+		reinterpret_cast<void **>(&g_char_refresh_orig)) != MH_OK || MH_EnableHook(cf) != MH_OK)
+		logf("gbm: Simple Select character hook failed (the CPU list has every character)");
 	logf("gbm: dialog cursor hooked (native look)");
 }
 

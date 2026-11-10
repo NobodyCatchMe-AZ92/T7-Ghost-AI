@@ -16,6 +16,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
 from combos import segments  # noqa: E402
+from recfile import find, logical  # noqa: E402
 from extract import rel_held, rle  # noqa: E402
 from load import char_name  # noqa: E402
 
@@ -58,12 +59,12 @@ def main(args):
     files = []
     for a in args:
         p = Path(a)
-        files += sorted(p.glob("combo_*.jsonl")) if p.is_dir() else [p]
+        files += find(p, "combo_*.jsonl") if p.is_dir() else [p]
     found = []
     for fp in files:
         for seg in segments(fp):
             for t in taunts_in(seg):
-                t["file"] = fp.stem
+                t["file"] = logical(fp).stem
                 found.append(t)
     drop = dropped()
     for ch in sorted({t["char"] for t in found}):

@@ -137,7 +137,20 @@ row. Character Select: the native "End Treasure Battle" is confirmed and the nex
 first ends its own way (an earlier direct request left a black screen).
 
 Main menu name: the Scaleform text table entry `menu_main_22` ("TREASURE BATTLE" / "Treasure Battle")
-is renamed in memory once the menus are up, heap only, re-checked right before each write.
+is renamed in memory once the menus are up, heap only, re-checked right before each write; while the
+entry is not found yet (at start-up the menus begin on the title screen, before the table exists) the
+scan is retried every 3 s.
+
+Choose a specific Opponent and Stage: the game's Simple Select movie (`SW_UI_CharacterSelect_Simple`)
+is opened over the result screen: its controller is made by `0x3F25B0(owner + 0x50)` with the Character
+Select object `[exe+0x34D5B90]` as owner (`+0x640` = 1), polled until finished (`+0x5D8`, cancelled
+`+0x670`) and destroyed with `0x556440`; the result window is hidden meanwhile (`_root.WindowArea_mc`
+"Off"; its input pauses while dialog `+0xC8` > 0). Panels: P1 `+0x688`, CPU `+0xA00` (`+0x25C` character,
+`+0x23C` costume slot, `+0x218` side, `+0x200` cursor, `+0x220` list position). The side refresh
+`0x47C5F0` is hooked to add a Stage row to the CPU side's options (text variables
+`$OptionName / $Value_L0-2 / R0-2`), and the character refresh `0x47C010` (character map at object
+`+0x678`, read with `0x476580`) so the CPU list steps over characters without a Ghost. The choice
+(character, costume, stage, our own character and costume) is applied at the next fight's setup.
 
 HUD treasure chests: the clips `_root.HUD_Positioning_mc.TreasureBox_Set_mc...` are played by `0x53CB90`
 (show), `0x53CD40` (update) and `0x53C9A0` (end); with "Hide treasure chests" they return without
@@ -146,8 +159,12 @@ playing (the results screen is another movie).
 ## Combo routes and punishes (`analysis/combos.py`, `analysis/punishes.py`, `src/brain.hpp`)
 
 Demonstrations are recorded in Practice with the dev build (Ctrl+F12, `t7ghost/combos/combo_*.jsonl`, the
-same per-frame format as other recordings). Repeated attempts are grouped and kept when done 3+ times
-(`analysis/combo_keep.txt` / `analysis/punish_keep.txt` add, drop or tune single ones).
+same per-frame format as other recordings; `tools/pack_recordings.py` gzips recordings to `.jsonl.gz`,
+and `analysis/recfile.py` lets every tool read both). Repeated attempts are grouped and kept when done 3+
+times (`analysis/combo_keep.txt` / `analysis/punish_keep.txt` add, drop or tune single ones; a 5th word in
+`punish_keep.txt` tunes a punish: `strict` = never from farther than the farthest recorded start,
+`strict=N` = never from farther than N units (1000 = 1.00 in game), `nolaunch` = it knocks down but is not
+a launch).
 
 Combo routes: a launch is the opponent becoming juggled (simple state 14); the launcher is our move at the
 last damage before it, a low parry is attack -> airborne without damage. A route is identified by the move
@@ -157,7 +174,7 @@ active on each damage frame. `routes_<char>.txt`, one route per line:
 At runtime a route starts when our move is a route's launcher within 20 frames of the launch, or when we
 left the launcher for its follow-up move at most 8 frames ago (e.g. a df+2 that hands over before the
 opponent is airborne); it is timed from the launcher's hit (`route_frame_hit`; its move timer can continue from the move
-before). Every Ghost has routes (475 for 36 characters); King's end with his grab (`combos.py --max-gap`
+before). Every Ghost has routes (563 for 40 characters); King's end with his grab (`combos.py --max-gap`
 keeps a slow grab ender in the same attempt). Kazuya, Steve and Noctis also have stun routes (starter `stun`, `combos.py --stun`): they start when our hit puts the
 opponent into a crumple (simple state 12 / 13 / 15 while stunned). A hit is a change of the opponent's
 last-hit damage value; `combos.py --hp-hits` also counts a health-bar drop with an unchanged value (hits
@@ -224,8 +241,9 @@ the character lacks falls back to a 1P-4P costume.
 
 ## Game Modifiers (`src/main.cpp` mods_tick)
 
-Offline battles only (game mode 2), settings latched at each new match (mode start, Ghost Battle's next
-fight, or the fight resuming after a loading screen with both players at full health). **No Rage**: the
+Gameplay modifiers: offline battles only (game mode 2), read live every frame, so ticking one works at
+once, even mid-match; Health is applied per round (when the game sets the max health at round start).
+The camera and lifebar HUD options (below) only change the local view and work in every mode. **No Rage**: the
 player byte `+0x757` bit `0x4` marks rage as used for the round; it is set for both players, so the game
 never grants rage (`+0x781` = in rage, `+0xC00` = the aura, synced by `0x722C60`). Clearing those two
 instead made the game start rage again every frame.
@@ -247,6 +265,44 @@ only; restored otherwise, on the game thread), and a hook on `0x717750` skips pr
 
 **No Screw.** `+0xB08` (dword) is -1 from a screw hit until the victim gets up (0 again at the wake-up
 reaction); a second screw in the same combo gives a normal juggle reaction. The mod keeps it at -1.
+
+**Movesets.** Player `+0x1520` = the moveset header: `+0x160` requirements (8 bytes, 881 ends a list),
+`+0x1B0` cancels (0x28 bytes: `+0` command, `+8` requirement list, `+0x24` target move u16; command
+`0x8000` ends a list), `+0x210` moves (0xB0 bytes: `+0` name, `+0x20` cancel list). Reactions play from
+the ATTACKER's moveset.
+
+**No Wall Bound.** A wall bound hit puts the opponent into `sDw_katay_PIN` (+L / R); its cancels lead to
+the bounce `sDm_PNGB_PON*`, keyed by requirement 182 (wall direction) and 34108 (early). The normal
+blowback `sDw_dwhiji` has the same keys leading to the wall splats `wDm_*`. Per moveset (deduplicated),
+each PON cancel's target (`+0x24`) is redirected to the splat with the same key, found by name; restored
+when the modifier is off or outside mode 2 (only if the moveset is unchanged).
+
+**Backdash / Sidestep Distance.** A move's travel is animation root motion (`+0x104..+0x10C`, absolute
+since the move start, sampled at `0x7663A6`), folded into the position (`+0xE0` x, `+0xE4` height, `+0xE8`
+z) at the move's end; position writes from outside do not stick. The game's root motion scale
+`0x6E73C0(offset, player)` is hooked: while the player's current move is a backdash (`<prefix>_sSTEPB`,
+`sSTEPBLp`, `sDASHB`, `sDASHBLp`, or the prefix-less `sSTEP_00B[Lp]` / `sDASH_00B[Lp]` some characters
+use) or a sidestep / sidewalk (`sSTEP_01L/R`, `sSTEP_21L/R`, `sWALK_dd[LR]`), the horizontal offset is
+scaled by the slider.
+
+**Camera Distance / Height.** Every camera view is copied with `0x6E2030(dst, src)` (views are 0x38
+bytes: eye, look-at, up vector, fov). The pipeline: `exe+0x34DE6F0` battle camera -> `0x34DE900`
+(cinematic) -> `0x34DE4F0` final (hit effects added). The hook changes the source before the copy (a
+change after it flickered for one frame): the eye moves along the look direction by the distance factor
+and both eye and look-at rise by the height. Its weight = the battle camera's share x (1 - effect), where
+the effect is the fov drop (a zoom-in, full at 10 degrees), eased 25% per frame, so Rage Arts, heavy-hit
+zoom-ins and slow motion keep their own framing. A shot more than 1.2x wider than the battle camera is
+the round-start shot; its lift is added in the round-start camera `0x6F1F40` (`+0xB4` / `+0xC4`). Height
+by default follows the distance (0 cm at 100%, +5 cm at 120%, linear). 200% on the slider = 1.75x.
+
+**Lifebar HUD (`src/hud.hpp`).** The game's HUD Settings (options `+0xA1D0`, 0 Standard / 1 Max) is
+applied per Flash movie by `0x459800(movie wrapper)`: with Standard it scales each clip listed for that
+movie (list `[exe+0x34CE958]`) with `0x459A30`. The mod hooks it and, after the game's own setting, reads
+each lifebar clip's position and scale (SW_UI_HUD_Gauge, SW_UI_HUD_Rage / _ELZ / _MRY `_root`, and
+SW_UI_HUD's `_root.HUD_Top_mc`) as its base, then sets its own on top, the same way the game's clip
+setters do (`0x4590F0` X, `0x459320` Y): GetVariable `0x1DBEE10`, then the display object's
+GetDisplayInfo / SetDisplayInfo (vtable `+0xD8` / `+0xE0`). Scaling is around the 1920 x 1080 stage's
+centre (960, 540); one slider step = 2 HUD pixels. Slider changes are applied on the game thread.
 
 ## Harvesters (`src/harvest.cpp`)
 

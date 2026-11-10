@@ -171,7 +171,9 @@ def player_ids(rec):
         # get numbered pseudonyms); untagged sides stay anonymous, one per match
         ids = [None, None]
         for i, lab in enumerate(live_labels(rec)):
-            if lab != ".":
+            if lab.upper().startswith("@P") and lab[2:].isdigit():
+                ids[i] = f"ref:{int(lab[2:])}"  # the player said: the same person as existing player P<n>
+            elif lab != ".":
                 ids[i] = f"label:{rec.path.parent}:{lab.lower()}"
         me = live_side(rec)
         if me is not None:
@@ -231,11 +233,25 @@ def main(rep_dirs, out_dir):
                 excluded.add(line.split("#")[0].strip())
     # pseudonyms: players numbered by first appearance; hashes themselves are not written out
     player_no = {"self": 1}  # the recording player is always P01
-    index = []
-    for (pid, cid), sides in groups.items():
-        if pid not in player_no:
+    for pid, cid in groups:
+        if pid not in player_no and not pid.startswith("ref:"):
             player_no[pid] = len(player_no) + 1
-        name = f"{char_name(cid).replace(' ', '')}-P{player_no[pid]:02d}"
+    # the same person under two numbers (analysis/same_players.txt: "P12 P07" = P12 is P07, by hand) and
+    # live sides tagged "@P<n>" join that player; numbering above is unchanged, so nobody else's pseudonym moves
+    same = {}
+    same_file = Path(__file__).with_name("same_players.txt")
+    if same_file.exists():
+        for line in same_file.read_text(encoding="utf-8").splitlines():
+            t = line.split("#")[0].split()
+            if len(t) == 2 and t[0].upper().startswith("P") and t[1].upper().startswith("P"):
+                same[int(t[0][1:])] = int(t[1][1:])
+    merged = collections.OrderedDict()
+    for (pid, cid), sides in groups.items():
+        n = int(pid[4:]) if pid.startswith("ref:") else player_no[pid]
+        merged.setdefault((same.get(n, n), cid), []).extend(sides)
+    index = []
+    for (n, cid), sides in merged.items():
+        name = f"{char_name(cid).replace(' ', '')}-P{n:02d}"
         chunks, frames, tb = [], 0, [0, 0]
         for rec, side in sides:
             chunks += [c for r in rec.rounds for c in extract_side(r.frames, side)]

@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from combos import END_FREE, KEEP_MIN, MAX_GAP, damage_steps, notation, segments  # noqa: E402
 from extract import cls, rel_held, rle  # noqa: E402
 from load import char_name  # noqa: E402
+from recfile import find, logical  # noqa: E402
 
 WINDOWS = {"block": [10, 13, 15], "low_block": [11, 15], "whiff": [11, 15]}  # the author's recording plan
 CROUCH = {5, 6, 7}   # simple_state while crouching (brain.hpp)
@@ -127,20 +128,24 @@ def punishes_in(frames, me):
     return found
 
 
-def manual_keep(drop=False, strict=False):
+def manual_keep(drop=False, flag=None):
     """(character, kind, window class, route) the author asked to keep anyway (or, lines starting with
-    '-', to drop - e.g. missed inputs that still punished): analysis/punish_keep.txt."""
-    out = set()
+    '-', to drop - e.g. missed inputs that still punished): analysis/punish_keep.txt. With `flag`: the
+    lines with that 5th word instead ("strict" = a hard reach limit, "strict=1800" = that limit in game units
+    (1000 = 1.00 in game), "nolaunch" = it knocks down but nothing combos after it - Marduk's ws4), as
+    {key: the number after '=' or None}."""
+    out = {} if flag else set()
     path = Path(__file__).with_name("punish_keep.txt")
     if path.exists():
         for line in path.read_text(encoding="utf-8").splitlines():
             parts = line.split("#")[0].split()
-            if strict:
+            if flag:
                 parts = parts if len(parts) == 5 else []
             if len(parts) == 4 and parts[0].startswith("-") == drop:
                 out.add((parts[0].lstrip("-"), parts[1], int(parts[2]), tuple(int(x) for x in parts[3].split(","))))
-            elif strict and len(parts) == 5 and parts[4] == "strict":
-                out.add((parts[0], parts[1], int(parts[2]), tuple(int(x) for x in parts[3].split(","))))
+            elif flag and len(parts) == 5 and parts[4].split("=")[0] == flag:
+                value = parts[4].partition("=")[2]
+                out[(parts[0], parts[1], int(parts[2]), tuple(int(x) for x in parts[3].split(",")))] = int(value) if value else None
     return out
 
 
@@ -152,7 +157,8 @@ def report(allp, out_dir):
         groups.setdefault((p["kind"], p["bucket"], p["route"]), []).append(p)
     order = {"block": 0, "low_block": 1, "whiff": 2}
     gl = sorted(groups.values(), key=lambda g: (order[g[0]["kind"]], g[0]["bucket"], -max(p["damage"] for p in g)))
-    keep_extra, drop, strict = manual_keep(), manual_keep(drop=True), manual_keep(strict=True)
+    keep_extra, drop, strict = manual_keep(), manual_keep(drop=True), manual_keep(flag="strict")
+    nolaunch = manual_keep(flag="nolaunch")
 
     def cut(g):
         k, dm = (g[0]["kind"], g[0]["bucket"], g[0]["route"]), max(p["damage"] for p in g)
@@ -163,6 +169,9 @@ def report(allp, out_dir):
     lines, kept, last = [f"{name} PUNISHES"], [], None
     for r, g in enumerate(gl, 1):
         best = max(g, key=lambda p: (p["damage"], -p["late"]))
+        if (name, best["kind"], best["bucket"], best["route"]) in nolaunch:
+            for p in g:
+                p["launch"] = False
         # the window it needs: frames from the first free frame to its hit (startup + any motion before
         # the press, e.g. EWGF 15, Asuka's ws 1,4 14) - the fastest attempt counts
         need = min(p["late"] + p["hitat"][0] + 1 for p in g)
@@ -205,7 +214,8 @@ def report(allp, out_dir):
         written.add((p["kind"], p["need"], p["route"]))
         reach = max(q["start_dist"] for q in groups[(p["kind"], p["bucket"], p["route"])])
         if (name, p["kind"], p["bucket"], p["route"]) in strict:
-            reach = -reach  # negative = a hard limit: never from farther than the author did it
+            # negative = a hard limit: never from farther than the author did it (or the given limit)
+            reach = -(strict[(name, p["kind"], p["bucket"], p["route"])] or reach)
         rl.append(f"{p['kind']} {p['need']} {p['punisher']} {p['hits']} {p['damage']} {p['frames']} {p['lead']} {p['press']} {reach} {p['lead'] - p['late']} {int(p['launch'])} | "
                   + " ".join(f"{m['move']}@{m['at']}{'*' if m['dmg'] else ''}" for m in p["moves"]) + " | "
                   + ",".join(f"{v}:{k}" for v, k in rle(p["inputs"])) + " | "
@@ -228,13 +238,13 @@ def main(args):
     files = []
     for a in args:
         p = Path(a)
-        files += sorted(p.glob("combo_*.jsonl")) if p.is_dir() else [p]
+        files += find(p, "combo_*.jsonl") if p.is_dir() else [p]
     allp = []
     for fp in files:
         for seg in segments(fp):
             if len(seg) > 30:
                 for p in punishes_in(seg, side):
-                    p["file"] = fp.name
+                    p["file"] = logical(fp).name
                     allp.append(p)
     if not allp:
         print("no punishes found")

@@ -201,6 +201,7 @@ bool write_if_same(uintptr_t at, const std::string &old, const std::string &now)
 	return true;
 }
 
+std::atomic<bool> g_renamed{ false }; // the main menu entry was renamed during this stay in the menus
 void rename()
 {
 	int done = 0, other = 0;
@@ -216,27 +217,38 @@ void rename()
 			++done;
 	}
 	if (done)
-		logf("text: renamed %d main-menu strings (%d other copies left alone)", done, other);
+		g_renamed = true, logf("text: renamed %d main-menu strings (%d other copies left alone)", done, other);
 }
 
 // worker loop: rename once the menus have been up for 2 s without a change (game mode 0 flickers
-// through every value during menu animations)
+// through every value during menu animations). Not found yet (2026-11-09: at start-up the menu mode begins on the
+// title screen, before the main menu's text table exists - the one try found nothing and the entry stayed
+// "TREASURE BATTLE" all session): try again every 3 s while in the menus, up to 3 minutes.
 void tick()
 {
-	static int last = -1;
+	static int last = -1, tries = 0;
 	static ULONGLONG due = 0;
 	ghost::Brain *b = g_brain;
 	const int mode = t7::read_global(t7::kGameMode);
 	if (mode != t7::kModeMenu)
 		due = 0;
 	else if (last != t7::kModeMenu)
-		due = GetTickCount64() + 2000;
+		due = GetTickCount64() + 2000, tries = 0, g_renamed = false;
 	last = mode;
 	if (due && GetTickCount64() >= due)
 	{
-		due = 0;
-		if (b && b->cfg.ghost_battle && b->cfg.gb_rename)
-			in_background([] { rename(); });
+		if (b && b->cfg.ghost_battle && b->cfg.gb_rename && !g_renamed && tries < 60)
+		{
+			if (!g_busy) // a scan still running: just wait for the next try
+			{
+				if (tries++ == 1)
+					logf("text: main menu entry not found yet - trying again every 3 s");
+				in_background([] { rename(); });
+			}
+			due = GetTickCount64() + 3000;
+		}
+		else
+			due = 0;
 	}
 }
 } // namespace gbt

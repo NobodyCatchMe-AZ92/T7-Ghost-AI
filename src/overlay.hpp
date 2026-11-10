@@ -409,7 +409,7 @@ void overlay_panel()
 	}
 
 	// profiles per character
-	// Game Modifiers: change the fighting itself (offline only, from the next match)
+	// Game Modifiers: change the fighting itself (offline only; Health from the next round, the rest at once)
 	if (ImGui::CollapsingHeader("Game Modifiers"))
 	{
 		auto save_mod = [](const wchar_t *key, bool v) { ini_set(L"modifiers", key, std::to_wstring(int(v))); };
@@ -425,6 +425,10 @@ void overlay_panel()
 		if (ImGui::Checkbox("No Screw", &nsc))
 			c.mod_no_screw = nsc, save_mod(L"no_screw", nsc);
 		help("Screw moves (the ones that spin a juggled opponent so the combo can continue) give a normal juggle hit instead.");
+		bool nwb = c.mod_no_wall_bound;
+		if (ImGui::Checkbox("No Wall Bound", &nwb))
+			c.mod_no_wall_bound = nwb, save_mod(L"no_wall_bound", nwb);
+		help("Wall bound moves (the ones that bounce the opponent off the wall so a combo can start) give a normal wall splat instead.");
 		int hp = std::clamp(c.mod_health, 25, 500);
 		ImGui::SetNextItemWidth(300 * sc);
 		if (ImGui::SliderInt("Health", &hp, 25, 500, "%d%%"))
@@ -432,7 +436,57 @@ void overlay_panel()
 		if (ImGui::IsItemDeactivatedAfterEdit())
 			ini_set(L"modifiers", L"health", std::to_wstring(c.mod_health));
 		help("Both players' health bars, in percent of normal: 200% takes twice the damage to KO, 50% half. Ctrl+click to type a value.");
-		ImGui::TextDisabled("offline battles only; changes take effect from the next match");
+		int bd = std::clamp(c.mod_backdash, 1, 200);
+		ImGui::SetNextItemWidth(300 * sc);
+		if (ImGui::SliderInt("Backdash Distance", &bd, 1, 200, "%d%%"))
+			c.mod_backdash = bd;
+		if (ImGui::IsItemDeactivatedAfterEdit())
+			ini_set(L"modifiers", L"backdash", std::to_wstring(c.mod_backdash));
+		help("How far both players' default backdash (b,b) travels, in percent of normal. Takes effect immediately. Ctrl+click to type a value.");
+		int ss = std::clamp(c.mod_sidestep, 1, 200);
+		ImGui::SetNextItemWidth(300 * sc);
+		if (ImGui::SliderInt("Sidestep Distance", &ss, 1, 200, "%d%%"))
+			c.mod_sidestep = ss;
+		if (ImGui::IsItemDeactivatedAfterEdit())
+			ini_set(L"modifiers", L"sidestep", std::to_wstring(c.mod_sidestep));
+		help("How far both players' sidesteps (tap up or down) and sidewalks (hold up or down) travel, in percent of normal. Takes effect immediately. Ctrl+click to type a value.");
+		int cam = std::clamp(c.mod_camera, 1, 200);
+		ImGui::SetNextItemWidth(300 * sc);
+		if (ImGui::SliderInt("Camera Distance (online friendly)", &cam, 1, 200, "%d%%"))
+			c.mod_camera = cam;
+		if (ImGui::IsItemDeactivatedAfterEdit())
+			ini_set(L"modifiers", L"camera", std::to_wstring(c.mod_camera));
+		help("How far the normal battle camera is from the fighters, in percent of normal (lower = closer). Cinematic cameras (Rage Arts, slow motion, wall bounds...) are not changed. Works in every game mode, online too (only your screen changes). Takes effect immediately. Ctrl+click to type a value.");
+		bool camf = c.mod_camera_height_free;
+		if (ImGui::Checkbox("Adjust camera height independently", &camf))
+			c.mod_camera_height_free = camf, ini_set(L"modifiers", L"camera_height_free", std::to_wstring(int(camf)));
+		if (c.mod_camera_height_free)
+		{
+			int camh = std::clamp(c.mod_camera_height, -100, 100);
+			ImGui::SetNextItemWidth(300 * sc);
+			if (ImGui::SliderInt("Camera Height Offset", &camh, -100, 100, "%+d cm"))
+				c.mod_camera_height = camh;
+			if (ImGui::IsItemDeactivatedAfterEdit())
+				ini_set(L"modifiers", L"camera_height", std::to_wstring(c.mod_camera_height));
+			help("Moves the normal battle camera straight up (or down) from where Camera Distance puts it, without tilting it. Cinematic cameras are not changed. Works in every game mode, online too. Takes effect immediately. Ctrl+click to type a value.");
+		}
+		auto hud_slider = [&](const char *label, int &v, int lo, int hi, const char *fmt, const wchar_t *key, const char *tip) {
+			int x = std::clamp(v, lo, hi);
+			ImGui::SetNextItemWidth(300 * sc);
+			if (ImGui::SliderInt(label, &x, lo, hi, fmt))
+				v = x;
+			if (ImGui::IsItemDeactivatedAfterEdit())
+				ini_set(L"modifiers", key, std::to_wstring(v));
+			help(tip);
+		};
+		hud_slider("Lifebar HUD X (online friendly)", c.mod_hud_x, -500, 500, "%+d", L"hud_x",
+			"Moves the lifebar HUD (health bars, names, portraits, rage, timer, round markers, ranks, title plates) left / right. Other HUD elements stay. Every game mode, online too. Ctrl+click to type a value.");
+		hud_slider("Lifebar HUD Y (online friendly)", c.mod_hud_y, -500, 500, "%+d", L"hud_y",
+			"Moves the lifebar HUD up / down (+ = down). Other HUD elements stay. Every game mode, online too. Ctrl+click to type a value.");
+		hud_slider("Lifebar HUD Size (online friendly)", c.mod_hud_scale, 50, 150, "%d%%", L"hud_scale",
+			"The lifebar HUD's size, in percent of the size Options > HUD Settings gives it (Standard / Max), around the screen centre. Other HUD elements stay. Every game mode, online too. Ctrl+click to type a value.");
+		ImGui::TextDisabled("camera and lifebar HUD options: every game mode, online too; everything else: offline battles only");
+		ImGui::TextDisabled("changes take effect at once (Health: from the next round)");
 		ImGui::Spacing();
 	}
 
@@ -462,18 +516,18 @@ void overlay_panel()
 		ImGui::Spacing();
 	}
 
-	// PLEASE HELP! (author's text, 2026-10-25): asks players to send play data from the harvesters
+	// PLEASE HELP! (author's text, 2026-10-25; counts and list updated 2026-10-26, 2026-11-01): asks players to send play data from the harvesters
 	if (ImGui::CollapsingHeader("PLEASE HELP!"))
 	{
 		static const char *help_text[] = {
-			"Data for nearly 20 characters is still totally missing!",
+			"Data for 11 characters is still totally missing!",
 			"Data for a further 15 characters is VERY small (only a few minutes of data gathered).",
 			"If we want to keep improving the single player experience of Tekken 7 and make the Ghost AI even more realistic, I will need YOUR help collecting play data that shows how real players use the characters in the game!",
 			"The Ghosts CANNOT WORK if they aren't fed data that teaches them how to play a character.",
 			"PLEASE HELP by gathering play data from real online matches you played (either from your 30 Replays in My Replay & Tips or just by playing real online matches like you normally would) and volunteering it by e-mailing the gathered data to me at DreamOfCasinoSoul@proton.me.",
 			"Data Harvesters for Replay and Live Match data collection have been included in the mod download .zip for this purpose. Read the provided readme instructions to use the Harvesters.",
 			"I CANNOT GATHER ENOUGH DATA ON MY OWN! Finding a match in this game is very hard now! Please help me gather the data needed to improve the Ghost AI further!",
-			"Data for the following missing characters is ESPECIALLY valuable: Kunimitsu, Zafina, Marduk, Anna, Geese, Armor King, Leroy, Fahkumram, Lidia, Master Raven, Nina, Panda, Eddy, Bob.",
+			"Data for the following missing characters is ESPECIALLY valuable: Kunimitsu, Law, Anna, Geese, Leroy, Fahkumram, Lidia, Master Raven, Nina, Panda, Bob.",
 		};
 		ImGui::PushTextWrapPos(0.0f); // wrap at the window edge
 		for (const char *t : help_text)
@@ -513,6 +567,15 @@ void overlay_panel()
 		c.mod_health = d.mod_health, ini_set(L"modifiers", L"health", std::to_wstring(d.mod_health));
 		c.mod_no_pc = d.mod_no_pc, ini_set(L"modifiers", L"no_power_crush", std::to_wstring(int(d.mod_no_pc)));
 		c.mod_no_screw = d.mod_no_screw, ini_set(L"modifiers", L"no_screw", std::to_wstring(int(d.mod_no_screw)));
+		c.mod_no_wall_bound = d.mod_no_wall_bound, ini_set(L"modifiers", L"no_wall_bound", std::to_wstring(int(d.mod_no_wall_bound)));
+		c.mod_backdash = d.mod_backdash, ini_set(L"modifiers", L"backdash", std::to_wstring(d.mod_backdash));
+		c.mod_sidestep = d.mod_sidestep, ini_set(L"modifiers", L"sidestep", std::to_wstring(d.mod_sidestep));
+		c.mod_camera = d.mod_camera, ini_set(L"modifiers", L"camera", std::to_wstring(d.mod_camera));
+		c.mod_camera_height = d.mod_camera_height, ini_set(L"modifiers", L"camera_height", std::to_wstring(d.mod_camera_height));
+		c.mod_camera_height_free = d.mod_camera_height_free, ini_set(L"modifiers", L"camera_height_free", std::to_wstring(int(d.mod_camera_height_free)));
+		c.mod_hud_x = d.mod_hud_x, ini_set(L"modifiers", L"hud_x", std::to_wstring(d.mod_hud_x));
+		c.mod_hud_y = d.mod_hud_y, ini_set(L"modifiers", L"hud_y", std::to_wstring(d.mod_hud_y));
+		c.mod_hud_scale = d.mod_hud_scale, ini_set(L"modifiers", L"hud_scale", std::to_wstring(d.mod_hud_scale));
 	}
 	ImGui::SameLine();
 	const bool armed = GetTickCount64() < g_ov.forget_armed;

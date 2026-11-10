@@ -459,11 +459,19 @@ struct Settings
 	bool gb_native_menu = true;     //   ...drawn in the game's own result window (off = the overlay)
 	bool gb_rename = true;          //   "TREASURE BATTLE" -> "GHOST BATTLE" in the menus (gbtext.hpp)
 	bool gb_hide_chests = true;     //   no treasure chest icons on the match HUD (results screen keeps them)
-	// Game Modifiers (2026-10-19; offline battles only, each takes effect from the next match - mods_tick)
+	// Game Modifiers (2026-10-19; offline battles only - mods_tick; Health from the next round, everything else at once)
 	bool mod_no_rage = false;       //   nobody gets rage
 	int mod_health = 100;           //   both players' max health in percent (25-500)
 	bool mod_no_pc = false;         //   no power crush armor
 	bool mod_no_screw = false;      //   screw moves don't extend combos
+	bool mod_no_wall_bound = false; //   wall bound hits give a normal wall splat
+	int mod_backdash = 100;         //   default backdash distance in percent (1-200)
+	int mod_sidestep = 100;         //   sidestep distance in percent (1-200)
+	int mod_camera = 100;           //   default battle camera distance in percent (1-200; every mode, online too)
+	int mod_camera_height = 0;      //   default battle camera height offset in cm (-100..100; every mode)
+	bool mod_camera_height_free = false; // the height slider instead of the height linked to the distance
+	int mod_hud_x = 0, mod_hud_y = 0;   //   lifebar HUD position offset (HUD pixels; every mode)
+	int mod_hud_scale = 100;            //   lifebar HUD size in percent of the HUD Settings size (50-150)
 };
 
 // Ghost AI presets (F1 "Ghost AI Preset", 2026-10-19). While one is chosen the Ghost AI sliders are

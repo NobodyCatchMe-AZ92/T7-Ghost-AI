@@ -44,7 +44,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 
 namespace {
 
-#define T7_VERSION_STR "1.1a" // keep in step with the t7ghost.ini header (tools/write_ini.py)
+#define T7_VERSION_STR "1.2a" // keep in step with the t7ghost.ini header (tools/write_ini.py)
 constexpr const char *kModVersion = T7_VERSION_STR;
 std::wstring g_dir; // .../Win64/t7ghost/
 FILE *g_log = nullptr;
@@ -538,6 +538,15 @@ ghost::Brain *load_brain()
 	b->cfg.mod_health = std::clamp(geti(L"modifiers", L"health", 100), 25, 500);
 	b->cfg.mod_no_pc = geti(L"modifiers", L"no_power_crush", 0) != 0;
 	b->cfg.mod_no_screw = geti(L"modifiers", L"no_screw", 0) != 0;
+	b->cfg.mod_no_wall_bound = geti(L"modifiers", L"no_wall_bound", 0) != 0;
+	b->cfg.mod_backdash = std::clamp(geti(L"modifiers", L"backdash", 100), 1, 200);
+	b->cfg.mod_sidestep = std::clamp(geti(L"modifiers", L"sidestep", 100), 1, 200);
+	b->cfg.mod_camera = std::clamp(geti(L"modifiers", L"camera", 100), 1, 200);
+	b->cfg.mod_camera_height = std::clamp(geti(L"modifiers", L"camera_height", 0), -100, 100);
+	b->cfg.mod_camera_height_free = geti(L"modifiers", L"camera_height_free", 0) != 0;
+	b->cfg.mod_hud_x = std::clamp(geti(L"modifiers", L"hud_x", 0), -500, 500);
+	b->cfg.mod_hud_y = std::clamp(geti(L"modifiers", L"hud_y", 0), -500, 500);
+	b->cfg.mod_hud_scale = std::clamp(geti(L"modifiers", L"hud_scale", 100), 50, 150);
 
 	// profiles/index.txt lists "<char> <name> <frames>" best-first; [profiles] c<char>=<name> overrides
 	const std::wstring dir = g_dir + L"profiles/";
@@ -733,9 +742,9 @@ int ai_side(const ghost::Settings &cfg)
 }
 
 // Game Modifiers: offline battles only (game mode 2: Practice, VS, Arcade, Treasure / Ghost Battle - never
-// online or replays). The settings are latched when a battle starts, so a change applies from the next match.
+// online or replays). Changes take effect at once; Health from the next round (health_tick).
 // Runs on the game thread, once per player per frame (decode_hook).
-struct Mods { bool no_rage = false, no_pc = false, no_screw = false; int health = 100; } g_mods;
+struct Mods { bool no_rage = false, no_pc = false, no_screw = false, no_wb = false; int health = 100, backdash = 100; } g_mods;
 
 // Health multiplier (2026-10-25, a write watch on the health percent +0x1508: exe+0x742C70 computes it every
 // frame as current * 100 / max). The health object is at player +0x14E0: max health at +0x14FC (16.16 fixed,
@@ -744,7 +753,7 @@ struct Mods { bool no_rage = false, no_pc = false, no_screw = false; int health 
 // We scale the max copies and keep the current health in step: whenever the game (re)sets the max (a new
 // match / round) and whenever the health goes UP (round start, Practice refill), it becomes the scaled max.
 constexpr uintptr_t kHealth = 0x14E0, kFnDecodeInt = 0x255A60, kFnEncodeInt = 0x2D0EA0;
-struct HealthState { int32_t base = 0, target = 0, last = 0; } g_health[2];
+struct HealthState { int32_t base = 0, target = 0, last = 0, seen = 0; } g_health[2];
 int32_t health_get(uintptr_t p)
 {
 	uint32_t chk = 0;
@@ -763,38 +772,197 @@ void health_set(uintptr_t p, int32_t v)
 }
 void health_tick(uintptr_t p, int idx, int pct)
 {
+	// per round (author, 2026-10-29): the slider's value is taken whenever the game sets the max (a new match /
+	// round) or the health comes back to full (a round start, a Practice refill) - never in the middle of a round
 	HealthState &st = g_health[idx];
 	int32_t mx = 0;
 	if (!t7::rd(p + 0x14FC, mx) || mx <= 0)
 		return;
-	if (pct == 100 && (st.target == 0 || mx == st.base))
-	{
-		st = {}; // off (and nothing of ours left to undo)
-		return;
-	}
 	const int32_t cur = health_get(p);
-	if (mx != st.target)
+	const bool game_max = mx != st.seen;            // the game (re)set the max
+	const bool refill = cur > st.last && cur >= mx;  // back to full
+	if (game_max || refill)
 	{
-		// the game set the max (new match / round, or our first frame): scale it
-		st.base = mx, st.target = int32_t(int64_t(mx) * pct / 100);
-		for (const uintptr_t o : { 0x14F8, 0x14FC, 0x1500 })
-			*reinterpret_cast<volatile int32_t *>(p + o) = st.target;
-		if (cur >= st.base)
-			health_set(p, st.target);
-		logf("mods: health P%d: max %d -> %d (x%d%%), current %d -> %d", idx + 1, st.base >> 16, st.target >> 16, pct, cur >> 16,
-			health_get(p) >> 16);
-		st.last = health_get(p);
-		if (pct == 100)
-			st = {};
+		const int32_t base = game_max || st.base <= 0 ? mx : st.base; // the unscaled max
+		const int32_t target = int32_t(int64_t(base) * pct / 100);
+		if (target != mx)
+			for (const uintptr_t o : { 0x14F8, 0x14FC, 0x1500 })
+				*reinterpret_cast<volatile int32_t *>(p + o) = target;
+		if (cur >= std::min(mx, base) && cur != target)
+			health_set(p, target);
+		if (target != mx || (game_max && pct != 100))
+			logf("mods: health P%d: max %d -> %d (x%d%%), current %d -> %d", idx + 1, base >> 16, target >> 16, pct, cur >> 16,
+				health_get(p) >> 16);
+		st = { base, target, health_get(p), target };
 		return;
 	}
 	if (cur > st.last && cur < st.target)
 	{
-		// health went up (a new round, a Practice refill): to the scaled max
+		// health went up (a Practice refill on its way): to the max
 		health_set(p, st.target);
 		logf("mods: health P%d: refill %d -> %d", idx + 1, cur >> 16, st.target >> 16);
 	}
 	st.last = health_get(p);
+}
+// Backdash distance (2026-10-28, Asuka's b,b sampled live, a write watch on her position, then her whole block every
+// frame of a backdash): the fighter's position is +0xE0 / +0xE4 / +0xE8 (x, height, z), but during a move it stays
+// at the move's start - the movement is the animation's root offset (+0x104 / +0x108 / +0x10C, along the facing),
+// rotated and added on top (+0x160 etc.) and folded into +0xE0 when the move ends. The player update samples the
+// offset from the animation every frame (exe+0x7663A6: the total since the move started, not a step) and hands it
+// to exe+0x6E73C0(offset, player), the game's own root motion scaling by the character's size (horizontal x
+// [0], [8], [0x10], [0x18]; vertical x [4], [0x14]). Hooked: after it, while that player is in their default
+// backdash the horizontal parts are scaled by the slider too. The default backdash is "<xx>_sSTEPB" / "_sSTEPBLp"
+// farther than 1800 from the opponent and "<xx>_sDASHB" / "_sDASHBLp" from 1800 or closer (the walk / stand
+// cancels: requirement 36:1800 / 35:1800; the prefix is the character's: Jn_, He_ ...). Some characters (King, Jin)
+// have them without a prefix as "sSTEP_00B" / "sSTEP_00BLp" and "sDASH_00B" / "sDASH_00BLp" (same requirements). Sidestep distance the same
+// way (2026-10-28, Leo sampled live): a sidestep is "sSTEP_01L" (up) / "sSTEP_01R" (down), "sSTEP_21L/R" its
+// variants - no prefix, and no other sidestep by distance. The same slider covers sidewalks (author): "sWALK_<2 digits>L/R"
+// (00, 01, 02, 21, 51 - holding up / down; forward / back walking is sWALK_00FMv / 00BMv, left alone). Offline battles only (g_bd_pct is 100 anywhere else).
+std::atomic<int> g_bd_pct[2] = { 100, 100 }, g_ss_pct[2] = { 100, 100 };
+enum StepKind { kNoStep, kBackdash, kSidestep };
+StepKind step_kind(uintptr_t p, int idx)
+{
+	static uintptr_t cache_move[2] = {};
+	static StepKind cache_kind[2] = {};
+	uint64_t mp = 0, np = 0;
+	if (!t7::rd(p + 0x218, mp) || !mp) // +0x218 = the current move (its moveset entry)
+		return kNoStep;
+	if (uintptr_t(mp) == cache_move[idx])
+		return cache_kind[idx];
+	char nm[24] = {};
+	cache_move[idx] = uintptr_t(mp), cache_kind[idx] = kNoStep;
+	if (!t7::rd(uintptr_t(mp), np) || !t7::safe_copy(nm, uintptr_t(np), sizeof nm - 1))
+		return kNoStep;
+	const char *u = std::strchr(nm, '_');
+	static const char *const backdash[] = { "sSTEPB", "sSTEPBLp", "sDASHB", "sDASHBLp" };              // after the prefix
+	static const char *const backdash_plain[] = { "sSTEP_00B", "sSTEP_00BLp", "sDASH_00B", "sDASH_00BLp" }; // no prefix
+	for (const char *b : backdash)
+		if (u && std::strcmp(u + 1, b) == 0)
+			cache_kind[idx] = kBackdash;
+	for (const char *b : backdash_plain)
+		if (std::strcmp(nm, b) == 0)
+			cache_kind[idx] = kBackdash;
+	if (cache_kind[idx] == kBackdash)
+		return kBackdash;
+	else if (std::strcmp(nm, "sSTEP_01L") == 0 || std::strcmp(nm, "sSTEP_01R") == 0 || std::strcmp(nm, "sSTEP_21L") == 0 ||
+		std::strcmp(nm, "sSTEP_21R") == 0)
+		cache_kind[idx] = kSidestep;
+	else if (std::strncmp(nm, "sWALK_", 6) == 0 && std::isdigit(uint8_t(nm[6])) && std::isdigit(uint8_t(nm[7])) &&
+		(nm[8] == 'L' || nm[8] == 'R') && nm[9] == 0)
+		cache_kind[idx] = kSidestep; // a sidewalk
+	return cache_kind[idx];
+}
+using RootScaleFn = void(__fastcall *)(float *, uintptr_t);
+RootScaleFn g_root_scale_orig = nullptr;
+void __fastcall root_scale_hook(float *off, uintptr_t player)
+{
+	g_root_scale_orig(off, player);
+	const uintptr_t base = t7::exe_base();
+	const int idx = player == base + t7::kLiveP1 ? 0 : player == base + t7::kLiveP2 ? 1 : -1;
+	if (idx < 0)
+		return;
+	const int bd = g_bd_pct[idx].load(std::memory_order_relaxed), ss = g_ss_pct[idx].load(std::memory_order_relaxed);
+	if (bd == 100 && ss == 100)
+		return;
+	const StepKind kind = step_kind(player, idx);
+	const int pct = kind == kBackdash ? bd : kind == kSidestep ? ss : 100;
+	if (pct == 100)
+		return;
+	const float k = float(pct) / 100.0f;
+	off[0] *= k, off[2] *= k, off[4] *= k, off[6] *= k;
+}
+void install_root_scale()
+{
+	static const uint8_t pro[] = { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x57, 0x48, 0x83, 0xEC, 0x40 }; // mov [rsp+8],rbx; push rdi; sub rsp,0x40
+	auto *fn = reinterpret_cast<void *>(t7::exe_base() + 0x6E73C0);
+	if (std::memcmp(fn, pro, sizeof pro) != 0 || MH_CreateHook(fn, reinterpret_cast<void *>(&root_scale_hook),
+		reinterpret_cast<void **>(&g_root_scale_orig)) != MH_OK || MH_EnableHook(fn) != MH_OK)
+		logf("mods: root motion hook failed (Backdash / Sidestep Distance have no effect)");
+}
+// Camera distance (2026-10-28): the battle camera views are 0x38-byte slots in .data (eye +0, look-at +0x10, up +0x20,
+// fov +0x30), copied in by exe+0x6E2030(dst, src) (then validated; an invalid one becomes a default), ~40 a frame.
+// Writing them from outside changed nothing - recomputed and used within a frame - so the setter is hooked. The
+// pipeline (author's tests + per-frame recordings): exe+0x34DE6F0 = the smoothed battle camera -> exe+0x34DE900 = it,
+// or a cinematic (Rage Arts...) blended in -> exe+0x34DE4F0 = that plus the hit effects (heavy moves: the fov punches
+// 65 -> 35..45 with a slight dolly; the Rage Art intro shots: their own close distance) = what is rendered. Only that
+// final view is changed, by how much of it is the battle camera: stage 2 like stage 1 (not a cinematic) and no hit
+// effect on top (its fov below stage 2's - 10 degrees = none of it). So heavy moves zoom from the user's distance into
+// the game's own close-up, Rage Arts keep their angles; a cinematic drops the share at once, and coming back it eases in
+// (8% a frame) so the camera zooms out smoothly. The height offset moves the eye and the look-at up together (a straight
+// lift, no tilt - the author's spec) with the same weight. Every game mode, online too (author, 2026-11-02): it only changes what this
+// screen shows - nothing of the fight.
+std::atomic<int> g_cam_pct{ 100 }, g_cam_height{ 0 }; // height in mm (the views are in mm)
+std::atomic<float> g_cam_share{ 1.0f };                // how much of the final view is the battle camera (eased)
+using CamSetFn = int64_t(__fastcall *)(float *, const float *);
+CamSetFn g_cam_set_orig = nullptr;
+int64_t __fastcall cam_set_hook(float *dst, const float *src)
+{
+	const int pct = g_cam_pct.load(std::memory_order_relaxed), height_mm = g_cam_height.load(std::memory_order_relaxed);
+	const uintptr_t base = t7::exe_base();
+	if ((pct == 100 && height_mm == 0) || reinterpret_cast<uintptr_t>(dst) != base + 0x34DE4F0)
+		return g_cam_set_orig(dst, src);
+	// the changed view is built first and handed to the game's own copy, so the final view never holds the unchanged
+	// one in between (2026-11-02 recording: single frames at 100% during a held Rage Art shot)
+	float v[14];
+	std::memcpy(v, src, sizeof v);
+	float share = g_cam_share.load(std::memory_order_relaxed);
+	float st1[13] = {}, st2[13] = {};
+	if (!t7::safe_copy(st1, base + 0x34DE6F0, sizeof st1) || !t7::safe_copy(st2, base + 0x34DE900, sizeof st2))
+		return g_cam_set_orig(dst, src);
+	float diff = 0;
+	for (int i = 0; i < 3; ++i)
+		diff += std::fabs(st1[i] - st2[i]) + std::fabs(st1[4 + i] - st2[4 + i]);
+	const float battle = std::clamp(1.0f - diff / 500.0f, 0.0f, 1.0f) * std::clamp(1.0f - std::fabs(st1[12] - st2[12]) / 10.0f, 0.0f, 1.0f);
+	share = battle < share ? battle : share + (battle - share) * 0.08f;
+	g_cam_share.store(share, std::memory_order_relaxed);
+	// a zoom-in (heavy hits, Rage Art close-ups: at or closer than stage 2) is left to the game; a WIDER shot with a
+	// narrower fov is the round-start shot ("Round 2... Fight!": 5000 at fov 54 over a 3400 battle camera, 2026-11-02
+	// recording) and keeps the player's distance and height
+	auto dist = [](const float *w) { return std::sqrt((w[0] - w[4]) * (w[0] - w[4]) + (w[1] - w[5]) * (w[1] - w[5]) + (w[2] - w[6]) * (w[2] - w[6])); };
+	const bool wide = dist(v) > dist(st2) * 1.2f;
+	const float effect_now = wide ? 0.0f : std::clamp((st2[12] - v[12]) / 10.0f, 0.0f, 1.0f);
+	// eased a quarter of the way a frame (author: a short fov punch in Leo's Rage Art start snapped to 100% in 2 frames)
+	static float effect = 0.0f;
+	effect += (effect_now - effect) * 0.25f;
+	// the slider's percent maps to 1 + (pct - 100%) * 0.75 (author: 200% = 1.75x, 25% = 0.44x - the full range felt too strong)
+	const float weight = share * (1.0f - effect);
+	const float g = 1.0f + (float(pct) / 100.0f - 1.0f) * 0.75f * weight;
+	for (int i = 0; i < 3; ++i)
+		v[i] = v[4 + i] + (v[i] - v[4 + i]) * g;
+	const float lift = float(height_mm) * weight; // +y = up
+	v[1] += lift, v[5] += lift;                     // eye and look-at together: a straight lift, no tilt (author)
+	return g_cam_set_orig(dst, v);
+}
+// The round-start camera (exe+0x6F1F40, this = the camera object; Ghost Battle's "Round 1/2... Fight!", found with
+// a read watch on the final view's eye height, 2026-11-02): it takes the final view's distance and angle but
+// recomputes the look-at from the fighters (exe+0x72BCB0 -> +0xC0) and the eye from it (+0xB0) every frame - so it
+// keeps the Camera Distance and drops the lift. Add the lift to both after it (no tilt, nothing accumulates).
+using RoundCamFn = int64_t(__fastcall *)(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+RoundCamFn g_round_cam_orig = nullptr;
+int64_t __fastcall round_cam_hook(uintptr_t self, uintptr_t a2, uintptr_t a3, uintptr_t a4)
+{
+	const int64_t r = g_round_cam_orig(self, a2, a3, a4);
+	const float lift = float(g_cam_height.load(std::memory_order_relaxed)) * g_cam_share.load(std::memory_order_relaxed);
+	float eye_y = 0, at_y = 0;
+	if (lift != 0.0f && t7::rd(self + 0xB4, eye_y) && t7::rd(self + 0xC4, at_y))
+	{
+		*reinterpret_cast<volatile float *>(self + 0xB4) = eye_y + lift;
+		*reinterpret_cast<volatile float *>(self + 0xC4) = at_y + lift;
+	}
+	return r;
+}
+void install_cam_set()
+{
+	static const uint8_t pro[] = { 0x48, 0x83, 0xEC, 0x28, 0x0F, 0x10, 0x02, 0x0F, 0x11, 0x01 }; // sub rsp,0x28; movups xmm0,[rdx]; movups [rcx],xmm0
+	auto *fn = reinterpret_cast<void *>(t7::exe_base() + 0x6E2030);
+	if (std::memcmp(fn, pro, sizeof pro) != 0 || MH_CreateHook(fn, reinterpret_cast<void *>(&cam_set_hook),
+		reinterpret_cast<void **>(&g_cam_set_orig)) != MH_OK || MH_EnableHook(fn) != MH_OK)
+		logf("mods: camera hook failed (Camera Distance has no effect)");
+	static const uint8_t rpro[] = { 0x48, 0x8B, 0xC4, 0x48, 0x89, 0x58, 0x10, 0x48, 0x89, 0x70, 0x18 }; // mov rax,rsp; mov [rax+10],rbx; mov [rax+18],rsi
+	auto *rf = reinterpret_cast<void *>(t7::exe_base() + 0x6F1F40);
+	if (std::memcmp(rf, rpro, sizeof rpro) != 0 || MH_CreateHook(rf, reinterpret_cast<void *>(&round_cam_hook),
+		reinterpret_cast<void **>(&g_round_cam_orig)) != MH_OK || MH_EnableHook(rf) != MH_OK)
+		logf("mods: round-start camera hook failed (the height is not kept in round-start shots)");
 }
 std::atomic<bool> g_mods_relatch{ false }; // a new match without leaving the mode (Ghost Battle's next fight)
 // No Power Crush: the two power crush property cases (exe+0x71D10F / 0x71D15A: mov byte [rcx+0x6C0], al) don't
@@ -835,6 +1003,128 @@ void pc_patch(bool on)
 	logf("mods: no power crush: armor flag code %s", on ? "patched" : "restored");
 }
 
+// No Wall Bound (2026-10-28, every-frame recording of Leo's f+1+2 at the wall and mid-stage, then the movesets read
+// live): hit reactions play from the ATTACKER's moveset (player +0x1520 = its header: +0x1B0 cancels, +0x210 moves,
+// 0xB0 each, +0x20 = the move's cancel list, 0x28 per cancel, +8 requirements, +0x24 target move, 0x8000 ends a list).
+// A wall bound hit puts the victim in a "PIN" flight (sDw_katay_PIN + L/R) whose cancels go to the wall bound moves
+// sDm_PNGB_PON* when the wall is touched (requirement 182 = wall direction 2/4/8); a normal blowback (sDw_dwhiji)
+// has the same requirements but goes to the wall splats wDm_*. With the modifier those PON cancels go to the splat
+// of the same direction and timing (34108 = the early window) - patched only in offline battles (game mode 2),
+// restored the first frame of anything else. Every character's moveset has the same reaction names.
+struct WbPatch { uintptr_t at; uint16_t orig, repl; };
+struct WbSet { uintptr_t moveset = 0; std::vector<WbPatch> p; } g_wb[2];
+bool wb_name(uintptr_t move, char (&out)[24])
+{
+	uint64_t np = 0;
+	out[0] = 0;
+	if (!t7::rd(move, np) || !t7::safe_copy(out, uintptr_t(np), sizeof out - 1))
+		return false;
+	out[sizeof out - 1] = 0;
+	return true;
+}
+// a cancel's wall key: requirement 182's direction, plus 0x100 when 34108 (the early window) is required too
+int wb_key(uintptr_t cancel)
+{
+	uint64_t rq = 0;
+	if (!t7::rd(cancel + 8, rq) || !rq)
+		return -1;
+	int dir = -1, early = 0;
+	for (int k = 0; k < 24; ++k)
+	{
+		uint32_t r = 0, v = 0;
+		if (!t7::rd(uintptr_t(rq) + 8 * k, r) || !t7::rd(uintptr_t(rq) + 8 * k + 4, v) || r == 881)
+			break;
+		if (r == 182)
+			dir = int(v);
+		else if (r == 34108)
+			early = 0x100;
+	}
+	return dir < 0 ? -1 : dir | early;
+}
+void wb_patch(bool on)
+{
+	const uintptr_t base = t7::exe_base();
+	for (int i = 0; i < 2; ++i)
+	{
+		WbSet &s = g_wb[i];
+		uint64_t ms = 0;
+		t7::rd(base + (i ? t7::kLiveP2 : t7::kLiveP1) + 0x1520, ms);
+		if (s.moveset && (!on || ms != s.moveset))
+		{
+			// off, or another moveset now: put ours back where it is still ours (a freed moveset is not touched)
+			int back = 0;
+			if (ms == s.moveset)
+				for (const WbPatch &pt : s.p)
+				{
+					uint16_t cur = 0;
+					if (t7::rd(pt.at, cur) && cur == pt.repl)
+						*reinterpret_cast<volatile uint16_t *>(pt.at) = pt.orig, ++back;
+				}
+			if (back)
+				logf("mods: no wall bound P%d: %d cancels restored", i + 1, back);
+			s = {};
+		}
+		if (!on || !ms || ms == s.moveset || ms == g_wb[i ^ 1].moveset)
+			continue; // nothing to do, done, or the other side has the same moveset
+		s.moveset = uintptr_t(ms);
+		uint64_t moves = 0, nmoves = 0;
+		if (!t7::rd(s.moveset + 0x210, moves) || !t7::rd(s.moveset + 0x218, nmoves) || !moves || nmoves == 0 || nmoves > 10000)
+			continue;
+		// the moves by name: the wall bound targets (PON) and the normal blowback the splats are taken from
+		std::vector<uint8_t> pon(size_t(nmoves), 0);
+		int64_t ref = -1;
+		char nm[24];
+		for (uint64_t m = 0; m < nmoves; ++m)
+			if (wb_name(uintptr_t(moves + m * 0xB0), nm))
+			{
+				if (std::strncmp(nm, "sDm_PNGB_PON", 12) == 0)
+					pon[size_t(m)] = 1;
+				else if (ref < 0 && std::strcmp(nm, "sDw_dwhiji") == 0)
+					ref = int64_t(m);
+			}
+		auto list = [&](uint64_t m, auto &&fn) {
+			uint64_t c = 0;
+			if (!t7::rd(uintptr_t(moves + m * 0xB0 + 0x20), c) || !c)
+				return;
+			for (int k = 0; k < 200; ++k, c += 0x28)
+			{
+				uint64_t cmd = 0;
+				uint16_t to = 0;
+				if (!t7::rd(uintptr_t(c), cmd) || !t7::rd(uintptr_t(c + 0x24), to))
+					return;
+				fn(uintptr_t(c), to);
+				if (cmd == 0x8000)
+					return;
+			}
+		};
+		std::unordered_map<int, uint16_t> splat; // wall key -> the normal splat move
+		if (ref >= 0)
+			list(uint64_t(ref), [&](uintptr_t c, uint16_t to) {
+				if (to < nmoves && wb_name(uintptr_t(moves + to * 0xB0), nm) && std::strncmp(nm, "wDm_", 4) == 0)
+					splat.emplace(wb_key(c), to);
+			});
+		if (splat.empty())
+		{
+			logf("mods: no wall bound P%d: no normal wall splat reaction found, left as it is", i + 1);
+			continue;
+		}
+		for (uint64_t m = 0; m < nmoves; ++m)
+			list(m, [&](uintptr_t c, uint16_t to) {
+				if (to >= nmoves || !pon[to])
+					return;
+				const int key = wb_key(c);
+				auto it = splat.find(key);
+				if (it == splat.end())
+					it = splat.find(key & 0xFF); // no early-window splat: the later one
+				if (it != splat.end())
+					s.p.push_back({ c + 0x24, to, it->second }); // the cancel's target move
+			});
+		for (const WbPatch &pt : s.p)
+			*reinterpret_cast<volatile uint16_t *>(pt.at) = pt.repl;
+		logf("mods: no wall bound P%d: %zu wall bound cancels -> wall splats", i + 1, s.p.size());
+	}
+}
+
 void mods_tick(uintptr_t p, int idx, const ghost::Brain *b)
 {
 	static int prev_mode = -1;
@@ -854,13 +1144,19 @@ void mods_tick(uintptr_t p, int idx, const ghost::Brain *b)
 		new_match = mode != prev_mode || g_mods_relatch.exchange(false) || fresh;
 		prev_mode = mode;
 	}
-	if (new_match && mode == t7::kModePractice && b)
+	// the checkboxes take effect immediately, Health from the next round (author, 2026-10-29; they used to be latched
+	// per match) - offline battles only, as before
+	if (idx == 0 && mode == t7::kModePractice && b)
 	{
 		const Mods was = g_mods;
 		g_mods.no_rage = b->cfg.mod_no_rage;
 		g_mods.health = b->cfg.mod_health;
 		g_mods.no_pc = b->cfg.mod_no_pc;
 		g_mods.no_screw = b->cfg.mod_no_screw;
+		g_mods.no_wb = b->cfg.mod_no_wall_bound;
+		g_mods.backdash = b->cfg.mod_backdash;
+		const bool changed = was.no_rage != g_mods.no_rage || was.no_pc != g_mods.no_pc || was.no_screw != g_mods.no_screw ||
+			was.no_wb != g_mods.no_wb || was.health != g_mods.health;
 		if (was.no_screw && !g_mods.no_screw)
 			for (const uintptr_t pl : { t7::exe_base() + t7::kLiveP1, t7::exe_base() + t7::kLiveP2 })
 				*reinterpret_cast<volatile int32_t *>(pl + 0xB08) = 0; // screws back: clear our "screw used" mark
@@ -871,13 +1167,17 @@ void mods_tick(uintptr_t p, int idx, const ghost::Brain *b)
 				if (t7::rd(pl + 0x757, f) && (f & 4))
 					*reinterpret_cast<volatile uint8_t *>(pl + 0x757) = uint8_t(f & ~4);
 			}
-		logf("mods: new match: no rage %s, health %d%%, no power crush %s, no screw %s", g_mods.no_rage ? "on" : "off", g_mods.health,
-			g_mods.no_pc ? "on" : "off", g_mods.no_screw ? "on" : "off");
+		if (changed || new_match)
+			logf("mods: %s: no rage %s, health %d%% (from the next round), no power crush %s, no screw %s, no wall bound %s",
+				new_match ? "new match" : "changed", g_mods.no_rage ? "on" : "off", g_mods.health, g_mods.no_pc ? "on" : "off",
+				g_mods.no_screw ? "on" : "off", g_mods.no_wb ? "on" : "off");
 	}
 	pc_patch(mode == t7::kModePractice && g_mods.no_pc);
+	if (idx == 0)
+		wb_patch(mode == t7::kModePractice && g_mods.no_wb);
 #ifndef T7_PUBLIC
 	// No Screw recon (2026-10-25): costume_watch_char=800 - record P2's whole player block (0x3670) every frame
-	// with P1's move id, for 2 minutes (frames_p2.bin: per frame u32 n, i32 p1 move, i32 p2 move, block)
+	// with P1's move id, for 3 minutes (frames_p2.bin: per frame u32 n, i32 p1 move, i32 p2 move, block)
 	if (idx == 1 && b && b->cfg.gb_costume_watch_char == 800 && mode == t7::kModePractice)
 	{
 		static FILE *rec = nullptr;
@@ -897,14 +1197,27 @@ void mods_tick(uintptr_t p, int idx, const ghost::Brain *b)
 				fwrite(&n, 4, 1, rec), fwrite(&m1, 4, 1, rec), fwrite(&m2, 4, 1, rec), fwrite(blk, 1, sizeof blk, rec);
 				++n;
 			}
-			if (n >= 60 * 120)
+			if (n >= 60 * 180)
 				fclose(rec), rec = nullptr, logf("screw recon: %u frames recorded", n);
 		}
 	}
 #endif
+	if (idx == 0) // the camera in every mode (it changes only what this screen shows)
+	{
+		// the height: linked to the distance by default (author: 100% = 0 cm, 120% = +5 cm, linear = 0.25 cm per percent),
+		// or the player's own value when "Adjust camera height independently" is ticked
+		const int pct = b ? b->cfg.mod_camera : 100;
+		g_cam_pct = pct;
+		g_cam_height = b && b->cfg.mod_camera_height_free ? b->cfg.mod_camera_height * 10 : (pct - 100) * 10 / 4; // mm
+	}
 	if (mode != t7::kModePractice)
+	{
+		g_bd_pct[idx] = 100, g_ss_pct[idx] = 100;
 		return;
+	}
 	health_tick(p, idx, g_mods.health);
+	g_bd_pct[idx] = b ? b->cfg.mod_backdash : 100; // the sliders' values right away (author), not latched
+	g_ss_pct[idx] = b ? b->cfg.mod_sidestep : 100;
 	if (g_mods.no_screw)
 	{
 		// screw (2026-10-25, every-frame recording of P2 through screw / no-screw combos): +0xB08 = -1 from the screw hit until
@@ -1024,6 +1337,7 @@ decoded:
 }
 
 #include "ghostbattle.hpp"
+#include "hud.hpp"
 #include "gbmenu.hpp"
 #include "gbtext.hpp"
 #ifndef T7_PUBLIC
@@ -1051,6 +1365,9 @@ bool install_hooks()
 	}
 	logf("hook: decode_input hooked");
 	gb::install();
+	install_root_scale();
+	install_cam_set();
+	hud::install();
 	gbm::install();
 #ifndef T7_PUBLIC
 	mtrace::install();
@@ -1372,6 +1689,7 @@ DWORD WINAPI worker(void *)
 #ifndef T7_PUBLIC
 		if (hotkey(VK_F8)) g_tracer.mark(), mtrace::mark();
 		if (hotkey(VK_F2)) mtrace::toggle();
+		if (hotkey(VK_END)) gbm::g_ss_req = true, logf("ss test: requested (Ctrl+End)");
 		// dialog_watch_tick(); // done (2026-10-19): readers found; the getter hooks in menutrace.hpp log the owners
 #endif
 		g_tracer.tick();
@@ -1379,6 +1697,7 @@ DWORD WINAPI worker(void *)
 		if (ghost::Brain *wb = g_brain)
 			gb::slotwatch::costume_watch_tick(wb->cfg.gb_costume_watch_char);
 		gb::slotwatch::tick();
+		gb::simple_select_tick();
 #endif
 		if (hotkey(VK_F10)) toggle_watch();
 		if (hotkey(VK_F9))

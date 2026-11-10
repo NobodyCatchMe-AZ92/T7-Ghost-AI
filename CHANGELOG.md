@@ -3,6 +3,55 @@
 Version numbers: the **number** changes when new features are added (v1.0a -> v1.1a), the **letter**
 changes when the Ghosts get new training data (v1.1a -> v1.1b).
 
+## v1.2a (2026-11-10)
+- **Eddy and Zafina get Ghosts** (40 characters now, 77 recorded players), with recorded punishes and combo
+  routes (normal hit, counter hit, low parry) like every other Ghost - 563 combo routes in all. New online
+  matches also add a lot for
+  Kazumi (27 -> 38 min), Negan (28 min), Shaheen (22 min), Gigas, Noctis, Devil Jin, Katarina, Asuka, Miguel,
+  Heihachi and others. 2533 moves of frame data (was 2334). F1 > PLEASE HELP!: 11 characters still missing.
+- **Game Modifiers take effect immediately** - No Rage, No Power Crush, No Screw and No Wall Bound switch on or
+  off the moment you tick them, even mid-match; **Health** applies from the next round (it used to wait for the
+  next match). Offline battles only, as before.
+- **No Wall Bound modifier** (F1 > Game Modifiers): wall bound moves give a normal wall splat instead of
+  bouncing the opponent off the wall, so they can't start a wall bound combo. Every character. Offline battles
+  only; off by default.
+- **Backdash Distance modifier** (F1 > Game Modifiers): a slider, 1-200% of how far both players' default
+  backdash (b,b) travels. Offline battles only; takes effect immediately, even mid-match. 100% (normal)
+  by default.
+- **Sidestep Distance modifier** (F1 > Game Modifiers): the same for sidesteps and sidewalks (tap or hold up
+  or down), 1-200%, takes effect immediately. Offline battles only; 100% by default.
+- **Camera Distance modifier** (F1 > Game Modifiers): how far the normal battle camera is from the fighters,
+  1-200% (lower = closer). Rage Arts, heavy-hit zoom-ins, slow motion and other cinematic shots keep their own
+  framing - a heavy hit zooms from your distance into the game's usual close-up and back. Takes effect
+  immediately and works in every game mode, online too (only your own screen changes); 100% by default.
+- **Camera height follows Camera Distance**: the camera rises a little as it zooms out (0 cm at 100%, +5 cm
+  at 120%, linear), straight up without tilting. Tick *Adjust camera height independently* to set it yourself
+  with the **Camera Height Offset** slider (-100 to +100 cm). Cinematic shots unchanged; every game mode.
+- **Lifebar HUD X / Y / Size (online friendly)** (F1 > Game Modifiers): move the lifebar HUD (health bars,
+  names, rage, portraits, timer, round markers, ranks, title plates) left / right and up / down (-500 to
+  +500 each), and make it smaller or bigger (50-150%) around the screen centre. Works on top of the game's own HUD
+  Settings (Standard / Max), takes effect immediately and works in every game mode, online too (only your own
+  screen changes).
+- **Choose a specific Opponent and Stage** (Ghost Battle end-of-match menu): opens the game's own Simple Select
+  screen - pick the Ghost you want to fight next (only characters with a Ghost are listed) and its costume,
+  your own character and costume, and the stage (a Stage row on the CPU side). The menu is now 5 rows:
+  Rematch < Same stage | New stage >, Next Opponent, Choose a specific Opponent and Stage, Return to Character
+  Select and Return to Main Menu.
+- Fixed: the main menu sometimes still said "Treasure Battle" instead of "Ghost Battle" (the rename now keeps
+  trying until the menu's text is there).
+
+## v1.1b (2026-10-26)
+- **Marduk and Armor King get Ghosts** (38 characters now, 70 recorded players), with recorded punishes and
+  combo routes like every other Ghost: Armor King 6 punishes and 18 routes, Marduk 6 punishes (his ws3 is his
+  only low launch punish) and 17 routes - normal hit, counter hit and low parry. 510 combo routes in all.
+- **More Ghost data**: new replays and online matches - King (2.6 -> 38 min), Lee (6 -> 22 min), Kazuya
+  (+12 min), Negan (+6 min), Alisa and Akuma (each about doubled). 2334 moves of frame data (was 2144).
+- One Claudio recording that played very poorly is left out, so Claudio's Ghost only imitates its main
+  recorded player.
+- Armor King's uf+4 launch punish is only used from close enough to connect (it whiffed after long
+  pushback); farther away he punishes with f+2,1.
+- F1 > PLEASE HELP!: the missing characters list is up to date (13 characters still have no Ghost).
+
 ## v1.1a (2026-10-25)
 - **Special fights, one checkbox per kind** (F1 > Ghost Battle Mode Settings): *Boss fights*, *Turbo
   Battle*, *Heist Battle*, *Double Damage Battle* and *Aerial Juggle Battle* - instead of one switch for all

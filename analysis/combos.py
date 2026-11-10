@@ -20,6 +20,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(__file__))
 from extract import cls, rel_held, rle  # noqa: E402
 from load import char_name  # noqa: E402
+from recfile import find, logical, open_rec  # noqa: E402
 
 LEAD = 12          # frames of input kept before the launcher starts (motion inputs, buffering)
 MAX_GAP = 150      # longest pause between two hits of one combo (the longest real one so far: ~130)
@@ -33,7 +34,7 @@ DIRS = {0x1: "u", 0x2: "d", 0x4: "b", 0x8: "f", 0x5: "ub", 0x9: "uf", 0x6: "db",
 def segments(path):
     """Frames of one recording, split where the game's frame counter restarted (new round / reset)."""
     seg, out = [], []
-    with open(path, encoding="utf-8") as f:
+    with open_rec(path) as f:
         for line in f:
             try:
                 d = json.loads(line)
@@ -227,13 +228,13 @@ def main(args):
     files = []
     for a in args:
         p = Path(a)
-        files += sorted(p.glob("combo_*.jsonl")) if p.is_dir() else [p]
+        files += find(p, "combo_*.jsonl") if p.is_dir() else [p]
     allc = []
     for fp in files:
         for seg in segments(fp):
             if len(seg) > 30:
                 for c in combos_in(seg, side):
-                    c["file"] = fp.name
+                    c["file"] = logical(fp).name
                     allc.append(c)
     if not allc:
         print("no combos found")

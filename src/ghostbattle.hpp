@@ -39,7 +39,16 @@ char g_status[160] = "";        // last fight set up (F1 panel)
 // confirms the native menu; next_hook takes it). ch = character to fight (-1 = random), name = that ranked
 // ghost's name (found again in the list at setup: the game rebuilds the list, so record pointers go stale -
 // test 2026-10-19: a kept pointer gave Steve an Eddy ghost's outfit), stage -1 = random
-struct Choice { int ch = -1; std::wstring name; int stage = -1; bool rematch = false; }; // rematch: Rematch / Rematch on a new stage
+struct Choice
+{
+	int ch = -1;
+	std::wstring name;
+	int stage = -1;
+	bool rematch = false; // Rematch / Rematch on a new stage
+	bool exact = false;   // "Choose a specific Opponent and Stage": exactly this fight (a regular one)
+	int costume = -1, own = 0; // exact: the opponent's costume slot (-1 = the Costumes option), own = custom slot 1-10
+	int my_ch = -1, my_costume = -1, my_own = 0; // exact: the player's character (Simple Select sets it) and costume
+};
 std::mutex g_choice_mx;
 Choice g_choice, g_now;           // pending / in use during this 0x439340 call (game thread)
 int g_cur_ch = -1;                // ranked ghost of the current fight (for Rematch)
@@ -381,6 +390,32 @@ void default_costume(uintptr_t cfg, int cs, uintptr_t cpu, const ghost::Settings
 	apply_costume(cfg, cs, cpu, c, ch, false);
 }
 
+// Simple Select's "Customized Slots" index -> a costume (2026-11-09; the list is Default 1-4 (1-2 where the
+// character has only two), then the character's presets, then the player's saved customizations in slot order):
+// slot = 0-3, kSlotPreset1 + n, or kSlotOwnCustom with own = the custom slot 1-10
+void ss_costume(int ch, int idx, int &slot, int &own)
+{
+	const int defaults = has_default34(ch) ? 4 : 2, presets = preset_count(ch);
+	own = 0;
+	if (idx < 0)
+		slot = -1;
+	else if (idx < defaults)
+		slot = idx;
+	else if (idx < defaults + presets)
+		slot = kSlotPreset1 + (idx - defaults);
+	else
+	{
+		int k = idx - defaults - presets;
+		const unsigned m = custom_slots(ch);
+		for (int s = 1; s <= 10 && !own; ++s)
+			if ((m >> (s - 1) & 1) && k-- == 0)
+				own = s;
+		slot = own ? kSlotOwnCustom : random_default(ch);
+	}
+	logf("gb: Simple Select costume index %d for char %d -> slot %d, custom slot %d (defaults %d, presets %d, custom 0x%03X)", idx, ch,
+		slot, own, defaults, presets, custom_slots(ch));
+}
+
 // the game's ranked ghosts whose character has a Ghost profile, by character
 std::map<int, std::vector<uintptr_t>> ghosts_by_char(ghost::Brain *b)
 {
@@ -659,6 +694,32 @@ void costume_watch_tick(int ch)
 		g_req[0] = t7::exe_base() + t7::kLiveP2 + 0x6C0; // the armor flag byte (+0x6C0..+0x6C3)
 		return;
 	}
+	// 650: writes to P1's position x (+0x160, copy +0xF4) - backdash distance recon: writing either from outside
+	// does not stick (rewritten within a frame), so who moves the fighter, and from what
+	if (ch == 650)
+	{
+		g_req[1] = t7::exe_base() + t7::kLiveP1 + 0xF4;
+		g_req[0] = t7::exe_base() + t7::kLiveP1 + 0x160;
+		return;
+	}
+	// 660: reads and writes of the two live battle camera slots' eye x (exe+0x34DC8E0, exe+0x34DCF70: eye, look-at,
+	// up, fov 65) - camera distance recon: writing them from outside changes nothing on screen
+	if (ch == 660)
+	{
+		g_write_only = false;
+		g_req[1] = t7::exe_base() + 0x34DCF70;
+		g_req[0] = t7::exe_base() + 0x34DC8E0;
+		return;
+	}
+	// 670: reads and writes of the final camera view's eye height (exe+0x34DE4F4) and its twin's (exe+0x34DE534) -
+	// camera height recon: the round-start shots ignore the lift although the final view has it
+	if (ch == 670)
+	{
+		g_write_only = false;
+		g_req[1] = t7::exe_base() + 0x34DE534;
+		g_req[0] = t7::exe_base() + 0x34DE4F4;
+		return;
+	}
 	// 500: writes to P2's health percent (+0x1508) - health multiplier recon: who computes it, from what
 	if (ch == 500)
 	{
@@ -848,6 +909,21 @@ void apply(int type)
 	}
 	else
 		apply_costume(cfg, cs, cpu, c, opp, true); // the ranked ghost the game picked: its own outfit fits
+	if (g_now.exact && g_now.costume >= 0 && opp == g_now.ch)
+	{
+		// the costume picked in Simple Select
+		if (!(g_now.own > 0 && wear_own_costume(cfg, cs, cpu, opp, g_now.own)))
+			set_costume(cfg, cs, cpu, g_now.own > 0 ? random_default(opp) : g_now.costume);
+		logf("gb: chosen costume for char %d: slot %d, custom slot %d", opp, g_now.costume, g_now.own);
+	}
+	if (g_now.exact && g_now.my_costume >= 0 && mine == g_now.my_ch)
+	{
+		// the player's own costume picked in Simple Select: Simple Select itself sets the player's character but the
+		// fight still loads Default 1 (author's test) - our side gets it like the opponent (C++ dresses our side)
+		if (!(g_now.my_own > 0 && wear_own_costume(cfg, side, me, mine, g_now.my_own)))
+			set_costume(cfg, side, me, g_now.my_own > 0 ? random_default(mine) : g_now.my_costume);
+		logf("gb: chosen costume for the player (char %d): slot %d, custom slot %d", mine, g_now.my_costume, g_now.my_own);
+	}
 	g_last_opp = opp, g_last_stage = stage;
 	{
 		// a preset on the opponent: the preset fix dresses them while this fight loads
@@ -901,7 +977,7 @@ uintptr_t __fastcall next_hook(uintptr_t self, uintptr_t fight, uintptr_t r8, ui
 	// "Next opponent" allows every ticked kind - a boss (1/2) or Heist (7) may come first, and the rematch
 	// options after it lead to the ghost that was picked
 	const bool own_opp = type == 1 || type == 2 || type == 7;
-	const bool chosen_ok = g_now.ch < 0 || !g_now.rematch || (g_now.stage < 0 && (type == 4 || type == 5 || type == 6));
+	const bool chosen_ok = g_now.ch < 0 || (!g_now.exact && (!g_now.rematch || (g_now.stage < 0 && (type == 4 || type == 5 || type == 6))));
 #ifndef T7_PUBLIC
 	// dev test (2026-10-25): [ghost_battle] force_special=N makes every Ghost Battle fight type N (end-of-match
 	// menu choices ignored) - to identify the special fight types
@@ -1075,8 +1151,59 @@ void __fastcall savecopy_hook(uintptr_t req)
 		slotwatch::g_cust = dest;
 	g_savecopy_orig(req);
 }
+// Simple Select recon (2026-11-09, dev): the controller (0xD78 bytes) is made by exe+0x3F25B0(owner + 0x50 = the
+// owner's task list) from the pause menu handler (0x3FA310) or 0x3F6CB0; the owner keeps it at +0xB8 and waits for
+// +0x5D8 != 0 (finished); the newest one is in the global exe+0x34D60F8. Logged: who makes it (owner, caller);
+// while one exists its whole object is snapshotted every 0.5 s (t7ghost/ss_NNN.bin + a log line) to find where
+// the choices are kept.
+using SsCreateFn = uintptr_t(__fastcall *)(uintptr_t);
+SsCreateFn g_ss_create_orig = nullptr;
+uintptr_t __fastcall ss_create_hook(uintptr_t list)
+{
+	const uintptr_t obj = g_ss_create_orig(list);
+	logf("simple select: created %p by exe+0x%llX, owner %p (list %p)", (void *)obj,
+		(unsigned long long)(uintptr_t(_ReturnAddress()) - t7::exe_base()), (void *)(list - 0x50), (void *)list);
+	return obj;
+}
+void simple_select_tick() // worker thread
+{
+	static ULONGLONG next = 0;
+	static int n = 0;
+	static uintptr_t last = 0;
+	if (GetTickCount64() < next)
+		return;
+	next = GetTickCount64() + 500;
+	uint64_t obj = 0;
+	if (!t7::rd(t7::exe_base() + 0x34D60F8, obj) || !obj)
+	{
+		if (last)
+			logf("simple select: gone"), last = 0;
+		return;
+	}
+	if (uintptr_t(obj) != last)
+		logf("simple select: object %p", (void *)obj), last = uintptr_t(obj);
+	static uint8_t buf[0xD78];
+	if (n >= 400 || !t7::safe_copy(buf, uintptr_t(obj), sizeof buf))
+		return;
+	char name[32];
+	snprintf(name, sizeof name, "ss_%03d.bin", n);
+	FILE *f = nullptr;
+	if (_wfopen_s(&f, (g_dir + std::wstring(name, name + strlen(name))).c_str(), L"wb") == 0 && f)
+		fwrite(buf, 1, sizeof buf, f), fclose(f);
+	uint8_t done = 0;
+	t7::rd(uintptr_t(obj) + 0x5D8, done);
+	logf("simple select: snapshot %s (finished flag %d)", name, done);
+	++n;
+}
 void install_costume_probe()
 {
+	{
+		static const uint8_t ss_pro[] = { 0x48, 0x89, 0x5C, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x30 };
+		auto *ss = reinterpret_cast<void *>(t7::exe_base() + 0x3F25B0);
+		if (std::memcmp(ss, ss_pro, sizeof ss_pro) != 0 || MH_CreateHook(ss, reinterpret_cast<void *>(&ss_create_hook),
+			reinterpret_cast<void **>(&g_ss_create_orig)) != MH_OK || MH_EnableHook(ss) != MH_OK)
+			logf("simple select probe: hook failed");
+	}
 	{
 		static const uint8_t sc_pro[] = { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x6C, 0x24, 0x10 };
 		auto *sc = reinterpret_cast<void *>(t7::exe_base() + 0x3D8A60);

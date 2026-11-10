@@ -5,8 +5,13 @@ frame-counter restarts (new round). No player names exist in the data; a replay 
 identified only by (recording file, slot, character).
 """
 import json
+import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+
+sys.path.insert(0, os.path.dirname(__file__))
+from recfile import find, logical, open_rec  # noqa: E402
 
 CHAR_NAMES = {
     0: "Paul", 1: "Law", 2: "King", 3: "Yoshimitsu", 4: "Hwoarang", 5: "Xiaoyu", 6: "Jin", 7: "Bryan",
@@ -51,7 +56,7 @@ class Recording:
 
 def load(path, min_round_frames=120):
     rounds, cur, probes = [], Round(), []
-    with open(path, encoding="utf-8") as fh:
+    with open_rec(path) as fh:
         for line in fh:
             line = line.strip()
             if not line:
@@ -93,7 +98,7 @@ def load(path, min_round_frames=120):
         if k not in best or len(r.frames) > len(rounds[best[k]].frames):
             best[k] = i
     rounds = [rounds[i] for i in sorted(best.values())]
-    return Recording(Path(path), rounds, probes) if rounds else None
+    return Recording(logical(path), rounds, probes) if rounds else None
 
 
 LIVE_FILL_MAX = 4  # live: frame gaps up to this size are filled by repeating the previous frame
@@ -126,7 +131,7 @@ def _live_recording(path, rounds, probes, min_round_frames):
             continue  # nobody took damage: not a fought round
         r.frames = filled
         out.append(r)
-    return Recording(Path(path), out, probes) if out else None
+    return Recording(logical(path), out, probes) if out else None
 
 
 def is_practice(rec):
@@ -145,7 +150,7 @@ def load_dir(d):
     out = []
     # rep_* = replay recordings (dev build / replay harvester), live_* = live harvester; contributor
     # folders may be nested (one subfolder per contributor)
-    for p in sorted(list(Path(d).rglob("rep_*.jsonl")) + list(Path(d).rglob("live_*.jsonl"))):
+    for p in sorted(find(d, "rep_*.jsonl", True) + find(d, "live_*.jsonl", True), key=logical):
         try:
             rec = load(p)
         except PermissionError:  # still being recorded
