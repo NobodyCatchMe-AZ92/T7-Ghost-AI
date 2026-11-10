@@ -16,6 +16,7 @@ walls.txt:
 The AI uses the first phase of a level that contains every position seen on it this round, so a
 break is recognised the moment someone is seen beyond the old wall.
 """
+import gzip
 import math
 import statistics
 import sys
@@ -127,7 +128,8 @@ def clip_ok(x, z, c):
 
 
 def main(survey, out):
-    lines = open(survey, encoding="utf-8", errors="replace").read().splitlines()
+    opener = gzip.open if str(survey).endswith(".gz") else open  # the dataset keeps it as walls/walls_survey.txt.gz
+    lines = opener(survey, "rt", encoding="utf-8", errors="replace").read().splitlines()
     res = ["# t7ghost wall maps (analysis/build_walls.py from the Practice wall-survey laps)",
            "# units: game root coordinates (~1000 per metre)"]
     res += [f"infinite {s}" for s in INFINITE]

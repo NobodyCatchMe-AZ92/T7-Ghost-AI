@@ -276,6 +276,112 @@ def main(rep_dirs, out_dir):
     print(f"{len(index)} profiles, {len({i[0] for i in index})} characters -> {out_dir}")
 
 
+def read_excluded():
+    excl_file = Path(__file__).with_name("excluded_profiles.txt")
+    excluded = set()
+    if excl_file.exists():
+        for line in excl_file.read_text(encoding="utf-8").splitlines():
+            if line.split("#")[0].strip():
+                excluded.add(line.split("#")[0].strip())
+    return excluded
+
+
+def read_same():
+    same = {}
+    same_file = Path(__file__).with_name("same_players.txt")
+    if same_file.exists():
+        for line in same_file.read_text(encoding="utf-8").splitlines():
+            t = line.split("#")[0].split()
+            if len(t) == 2 and t[0].upper().startswith("P") and t[1].upper().startswith("P"):
+                same[int(t[0][1:])] = int(t[1][1:])
+    return same
+
+
+def labelled(rep_dirs):
+    """The raw-folder pipeline's player numbering as data: [(recording, (pseudonym number of p1, of p2))] in
+    processing order, with same_players.txt applied - exactly the numbers main() gives (used once to turn the
+    private recordings into the public dataset, tools/make_dataset.py)."""
+    global _MAIN_DIR
+    _MAIN_DIR = Path(rep_dirs[0]).resolve()
+    recs = unique_recordings([r for d in rep_dirs for r in load_dir(d)])
+    order = {Path(d).resolve(): i for i, d in enumerate(rep_dirs)}
+    recs.sort(key=lambda r: (min((i for d, i in order.items() if d in r.path.resolve().parents), default=len(order)),
+                             r.path.name.startswith("live_"), r.path.name))
+    _PLACEHOLDERS.clear()
+    _PLACEHOLDERS.update(placeholder_hashes(recs))
+    anon, pids = 0, []
+    for rec in recs:
+        ids = list(player_ids(rec))
+        for si in (0, 1):
+            if ids[si] is None:
+                anon += 1
+                ids[si] = f"anon{anon}"
+        pids.append(ids)
+    # numbering exactly as main(): first appearance of a (player, character) group
+    player_no = {"self": 1}
+    seen = set()
+    for rec, ids in zip(recs, pids):
+        for si in (0, 1):
+            key = (ids[si], rec.chars[si])
+            if key in seen:
+                continue
+            seen.add(key)
+            if ids[si] not in player_no and not ids[si].startswith("ref:"):
+                player_no[ids[si]] = len(player_no) + 1
+    same = read_same()
+    out = []
+    for rec, ids in zip(recs, pids):
+        ns = []
+        for pid in ids:
+            n = int(pid[4:]) if pid.startswith("ref:") else player_no[pid]
+            ns.append(same.get(n, n))
+        out.append((rec, tuple(ns)))
+    return out
+
+
+def build_from_labels(items, out_dir):
+    """Profiles from labelled recordings [(recording, (n p1, n p2))] in processing order (the dataset path).
+    Same files as main(); a profile merged from two numbers lists its chunks in recording order."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for old in out_dir.glob("*.t7p"):
+        old.unlink()
+    same, excluded = read_same(), read_excluded()
+    merged = collections.OrderedDict()
+    for rec, ns in items:
+        for si, side in enumerate(("p1", "p2")):
+            n = same.get(ns[si], ns[si])
+            merged.setdefault((n, rec.chars[si]), []).append((rec, side))
+    index = []
+    for (n, cid), sides in merged.items():
+        name = f"{char_name(cid).replace(' ', '')}-P{n:02d}"
+        chunks, frames, tb = [], 0, [0, 0]
+        for rec, side in sides:
+            chunks += [c for r in rec.rounds for c in extract_side(r.frames, side)]
+            for r in rec.rounds:
+                g, b = throw_breaks(r.frames, side)
+                tb[0] += g
+                tb[1] += b
+            frames += sum(len(r.frames) for r in rec.rounds)
+        if not chunks:
+            continue
+        if name in excluded:
+            print(f"{name:18} excluded (analysis/excluded_profiles.txt)")
+            continue
+        write_profile(out_dir / f"{name}.t7p", cid, name, frames, chunks, tb)
+        index.append((cid, name, frames))
+    index.sort(key=lambda x: (x[0], -x[2]))
+    with open(out_dir / "index.txt", "w", encoding="ascii", newline="\n") as f:
+        for cid, name, frames in index:
+            f.write(f"{cid} {name} {frames}\n")
+    print(f"{len(index)} profiles, {len({i[0] for i in index})} characters -> {out_dir}")
+
+
 if __name__ == "__main__":
-    # build_profiles.py <recordings dir> [<more dirs, e.g. live data> ...] <profiles out dir>
+    # build_profiles.py <dataset folder> <profiles out dir>          (the public dataset, docs/DATASET.md)
+    # build_profiles.py <recordings dir> [<more dirs, e.g. live data> ...] <profiles out dir>   (raw folders)
+    from dataset import is_dataset, load_dataset
+    if len(sys.argv) == 3 and is_dataset(sys.argv[1]):
+        build_from_labels([(rec, ns) for rec, ns, _ in load_dataset(sys.argv[1])], sys.argv[2])
+        sys.exit(0)
     main(sys.argv[1:-1], sys.argv[-1])

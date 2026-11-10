@@ -4,6 +4,30 @@ Target: Tekken 7, Steam, final build (`TekkenGame-Win64-Shipping.exe`, PE timest
 2023-02-14, Unreal Engine 4). The mod checks the timestamp and stays inert on any other build (with a
 one-time message box saying so; another one appears when the overlay can't hook `Present` or start).
 
+## Project map
+
+```
+recordings (dev build / Replay + LIVE Harvesters)          src/main.cpp recorder, src/harvest.cpp
+   -> public dataset (anonymised, P<nn> pseudonyms)         docs/DATASET.md, tools/add_recordings.py
+   -> profiles (*.t7p) + framedata.txt                      analysis/build_profiles.py, extract.py, framedata.py
+Practice demonstrations (Ctrl+F12, dev build)
+   -> routes_ / punishes_ / taunts_<char>.txt                analysis/combos.py, punishes.py, taunts.py
+Practice wall laps (dev build)  -> walls.txt                analysis/build_walls.py
+the mod (dinput8.dll) loads all of it from Win64/t7ghost/   src/*.hpp; settings t7ghost.ini (tools/write_ini.py)
+```
+
+How to keep the project going (recording, adding data, releasing): [MAINTAINING.md](MAINTAINING.md). The
+dataset: [DATASET.md](DATASET.md). Source modules: `main.cpp` (loader thread, hooks, recorder, settings, Game
+Modifiers, camera), `brain.hpp` (the AI), `adapt.hpp` (model of the human), `walls.hpp`, `overlay.hpp` (F1
+panel), `ghostbattle.hpp` / `gbmenu.hpp` / `gbtext.hpp` (Ghost Battle Mode), `hud.hpp` (lifebar HUD), `t7.hpp`
+(memory layout), `names.hpp` (name hashing), `finder.hpp` / `menutrace.hpp` (research tools), `loader.hpp` /
+`proxy_version.cpp` (DLL proxy), `harvest.cpp` (Harvesters).
+
+Builds: `build.bat` makes the dev build (`build\dinput8.dll`: recorders, Ctrl+F12 combo lab, research hotkeys,
+traces, `status.txt`) and the release build (`build\public\dinput8.dll`, `/DT7_PUBLIC`: AI, learning, F1
+panel, Ghost Battle, modifiers only - everything dev-only is inside `#ifndef T7_PUBLIC`, and it never reads
+player names). `build_harvest.bat` makes the two Harvesters.
+
 ## Loading
 
 `dinput8.dll` in `TekkenGame/Binaries/Win64` is a proxy (the game imports DINPUT8; no system DLL depends
@@ -78,20 +102,114 @@ recovery / stunned / juggled / down, self down. `advb` = frame-advantage bucket 
 `opponent_<char>.txt` (`OPP 1`): the AI's model of the human per character (attack rates and levels
 per situation, getup habits, seen moves, punish results, lost interrupts, sidestep results).
 
+## From recordings to profiles (`analysis/`)
+
+**Loading** (`load.py`). Replays: playing a replay first fast-simulates every round (sampled with gaps),
+then plays it in real time; only segments with >= 97% frame coverage whose end frame matches a fast-pass
+round are kept, and the post-match idle is dropped. Live: gaps of up to 4 frames are filled by repeating the
+previous frame, segments with bigger holes are dropped, and only segments where someone lost health are rounds;
+Practice sessions in the live files (no KO, `side_info[0]` = 4) are skipped. Copies of one match (re-watches)
+share characters and at least two round-end frames (`build_profiles.unique_recordings`); the copy with name
+probes and the most frames is kept.
+
+**Players** (`build_profiles.py`, `identity.py`). Replays from the Battle Log always have the recording player
+on one side (`self_sides.txt`: the original match side, default P1); the opponent is identified by the keyed
+hash of the match structure's opponent-name slot (`("match", 0x11C, "8")`). A hash seen with 4+ different
+characters is the game's stand-in for an unavailable name (anonymous). Live matches never use names: the
+recording player's side and same-person tags come from `my_matches.txt`. Players are numbered by first
+appearance in processing order (P01 = the original author); `same_players.txt` merges two numbers,
+`excluded_profiles.txt` drops a profile. The public dataset stores the final number of every side, so builds
+from it need no hashes (DATASET.md).
+
+**Chunks** (`extract.py`). Each side of each round is cut into decisions: *attack* (from a free state into an
+attack, through strings and combo follow-ups), *neutral* (up to 20 frames of movement / guarding, cut only where
+the direction input has settled for 9 frames so dashes stay whole, max 40), *wakeup* (inputs while down), *air*.
+Each keeps the exact raw inputs (player-relative held words, run-length coded), up to 10 frames of lead-in, and
+the situation at its first input: `sit` (neutral / opponent in startup / recovering / stunned / juggled / down /
+self down), distance bucket, the opponent's remaining recovery (`adv`) or attack level (`oppatk`), life lead
+(+-20%), own / opponent rage, crouching, frame-advantage bucket, and the outcome (whiff / blocked / hit / counter
+/ juggle / interrupted) with damage. Health comes from `hp` (+0x1508); rage from the aura timer (+0x8E0) at low
+health. `throw_breaks` counts grabs and breaks as the defender; the `k` lines are each string starter's
+continuation rate by how its first hit went (hit-confirm).
+
+**Frame data** (`framedata.py`): per (character, move), medians over every sample: startup (the game's own
+startup field), hit level, damage, block / hit advantage (defender free minus attacker free; only samples where
+the attacker did not go on into another attack), launch share, reach (98th percentile connect distance) and
+start reach (farthest start distance that still connected, 5+ samples).
+
 ## The AI (`src/brain.hpp`, `src/adapt.hpp`)
 
-Per frame, with a perception delay (`reaction_frames`; or instantly for moves "read" by the
-`input_read_chance` cheat): guard strings, buffered punishes on the last blockstun frame (window from
-learned readings, then frame data, then live recovery), whiff punishes (dashing in if needed),
-juggles with the player's combos, hit-confirm, throw breaks, then the recorded player's own choice
-for the situation (frame advantage, distance, life lead, rage), weighted by how it worked out in the
-replays. `adapt.hpp` models the human live and biases those choices.
+`Brain::step` runs on the game thread inside `decode_input` for the side the AI drives and returns the held /
+pressed words for that frame. Each frame, in order:
+
+- **Perception.** The opponent is seen through a delayed copy (`reaction_frames`; 14 = a strong human); moves
+  the human has shown many times are recognised up to 4 frames faster; a move "read" by the
+  `input_read_chance` cheat is known the frame it starts and cancels a chunk not yet out.
+- **Guarding.** Guard is held through hit / block stun and for as long as the opponent's attack is in startup
+  or active (non-natural string follow-ups get blocked); crouch for perceived lows (and read highs / throws).
+  `guard_skill` is rolled once per perceived move, not per frame. A blockstun that began as a block stays one
+  even when their move rolls into a follow-up.
+- **Buffered punish.** On the last blockstun frame the punish is pressed so it comes out on the first free
+  frame. The window = frames we had after blocking that move before (`learned_framedata.txt`, most reliable),
+  else the frame data, else the live remaining recovery (ring startup fields are trusted only from a move's 2nd
+  frame). A follow-up that is already coming (a string) is guarded, not punished. Punishment Proficiency rolls
+  once per opening for a *perfect* punish (see "Combo routes and punishes"); otherwise the player's own punish
+  for that window. Every blocked move is also measured (how long they really stayed recovering) and the reading
+  is appended to `learned_framedata.txt`.
+- **Throw breaks.** When `throw_tech` turns into a break code, the break button(s) are tapped through the window
+  with the `throw_break` chance.
+- **Routes, juggles, taunts** (`route_tick`, `taunt_tick`): a recorded combo route starts after our launcher
+  (see below); otherwise juggles use the player's own air chunks.
+- **Decision** (`choose`, when free): 1. a guaranteed punish of a whiff or known recovery (dashing in with the
+  players' own f,n,f when a punisher fits once the dash is done); 1b. a read move: stand still if it will whiff
+  (judged by its start distance), counter-hit it if it is slow enough (unless interrupting it lost a trade
+  before), sidestep it if known steppable, else guard it the right way; 2. keep juggles going; 3. guard what is
+  coming and through pressure (short interruptible guard chunks; rate = the player's guard habit); 4. the
+  player's own choice: chunks recorded in the same situation, matching frame advantage, then distance, then
+  life lead and rage, backing off one condition at a time; rage-only chunks (Rage Arts) need our rage.
+- **Sampling** (`weight`): every matching chunk can be picked, weighted by outcome: hit / counter / juggle
+  `1 + 2 * decision_skill`, whiff `1 - 0.5 * skill`, interrupted `1 - 0.7 * skill`; chunks that misfired when
+  we played them (the intended first move did not come out: execution self-check) drop to 0.15; the adaptation
+  and wall biases multiply attack / neutral weights.
+- **Hit-confirm.** After the first move of an attack chunk whiffs / is blocked / hits, the rest of the string
+  is played only as often as this player went on after that result (`k` lines).
+- **Sidesteps.** The direction that evaded a move more often than it failed is used; which way an up-tap goes
+  on each screen side is learned from the first clear sidestep.
+
+**Imitation** (`[profiles] c<char>`, F1 Imitation Settings): *merged* (default) = every player of the
+character as one profile; *hybrid* = the best profile (most frames) first, the others only fill situations it
+has no answer for (and compete for punishes / combos); or one named profile. Ghost Battle's "Random player per
+ghost" picks one recorded player per fight.
+
+**Adaptation** (`adapt.hpp`, step 5, `adapt` slider). A model of the human per human character, kept across
+sessions in `opponent_<char>.txt`: per situation (their frame advantage minus / even / plus x distance bucket)
+how often they attack when free and with which level; getup habits; moves seen; which of our punishes worked;
+moves where interrupting lost a trade; sidestep results per move. Used at decision time: where they attack a
+lot (>= 50%), guard / evade more and prefer fast moves; where they sit back (<= 20%), take the initiative; a
+strong low habit sometimes gets a crouch guard before anything is seen. It only uses patterns, never the human's
+inputs. "Forget my habits" deletes the files.
 
 ## Settings panel (`src/overlay.hpp`)
 
 Hooks `IDXGISwapChain::Present` / `ResizeBuffers` (found through a throwaway D3D11 swap chain),
 draws Dear ImGui over the game's back buffer while open, and subclasses the window procedure for
 input. Changes go to the running AI and to `t7ghost.ini` (WritePrivateProfileString).
+
+## Settings, ini and hotkeys
+
+Every option and its explanation: `tools/write_ini.py` (it writes `dist/t7ghost.ini`, the release default;
+sections `[ai]`, `[profiles]`, `[ghost_battle]`, `[modifiers]`, `[ui]`). Hidden keys: `[ai] taunts=0`;
+`[ghost_battle] costume_watch_char=N` (dev research modes, see below). Ctrl+F9 reloads the ini and profiles.
+F1 (or `[ui] menu_key`) opens the panel. The panel writes the ini; Ghost AI presets lock the sliders (the
+ini keeps the custom values).
+
+Dev build hotkeys (Ctrl + key, game window focused): F12 combo recording; F6 manual recorder
+(`rec_<time>.jsonl`); F5 dump both player objects; F7 / F8 settings tracer on/off / marker; F2 Scaleform menu
+trace; F10 hardware write-watch on P2 input fields; F11 mirror test (P2 repeats P1's raw input); F4 / F3
+main-menu text report / rename; End opens Simple Select over the result screen (test). Replays are recorded
+automatically in replay mode (`t7ghost/replays`); in Practice the wall survey appends positions to
+`walls_survey.txt`; `status.txt` is rewritten twice a second (ring, frame, recorder and trace state, both players' fields); the AI writes a
+per-frame `ai_trace_<time>.log` while it drives a side.
 
 ## Which fights the AI plays
 
@@ -347,6 +465,38 @@ guarding and movement, sidesteps toward the side with more room (a 1-frame up/do
 which way "up" goes on each screen side is learned from the first clear sidestep). Cornered: guards
 more and tries a throw within 1.2 m. Opponent at the wall: more attacks, weighted toward heavy hitters
 (damage, launchers) that splat.
+
+## Development and research tools
+
+How the addresses in this file were found, so new ones can be found the same way:
+- **External reads** of the live player objects while playing (`tools/peek.py watch <offsets>`: print fields
+  when they change; `tools/sampler.py`: periodic dumps of both objects and the exe's `.data` for diffing).
+- **Per-frame recordings**: the recorder's fields, or a whole player block every frame
+  (`costume_watch_char=800` records P2's 0x3670-byte block in Practice), compared across known events.
+- **Field finder** (`finder.hpp`): ranks offsets whose value drops by exactly the damage of a hit (health) or
+  flips once per round at low health (rage) while replays play.
+- **Write-watch**: Ctrl+F10 and the `costume_watch_char` modes 300 / 600 / 650 / 660 / 670 / 700 set hardware
+  breakpoints or hooks on a field and log the code addresses that write it (e.g. 650 = writers of P1 position
+  `+0x160` / `+0xF4`, 700 = move properties of power crush moves). Their notes are in `ghostbattle.hpp` /
+  `main.cpp` next to each mode.
+- **Scaleform menus** (`menutrace.hpp`, Ctrl+F2): every clip path and Invoke the game's 19 wrapper functions
+  (`0x452E40`..`0x459A30`) send, so a menu's clips, text variables and calls can be read off a log.
+- **Wall surveys**: lap every wall in Practice; `tools/wallcheck.py` shows how much of each wall was walked;
+  `analysis/build_walls.py` (its header lists the survey line ranges per stage) builds `walls.txt` from the
+  survey (in the dataset as `walls/walls_survey.txt.gz`).
+- `tools/replay_pilot.py`: screenshots and key presses to step through saved replays unattended.
+
+## Tests
+
+`tests/build_test.bat` builds `profile_test` (loads a `.t7p` with the mod's own parser and prints a summary)
+and `wall_test` (ray distances on a known stage, and the wall-break tracker replayed over the real survey laps;
+phases must advance in the order the walls were broken). The data pipeline's check: a rebuild from the dataset
+must reproduce the shipped profiles and `framedata.txt` byte for byte.
+
+## Known issues
+
+- Leo's Rage Art, second camera angle: with Camera Distance away from 100% the angle change is not fully smooth
+  (the cinematic weighting eases it, but a short jump remains).
 
 ## Stage ids
 

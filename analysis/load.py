@@ -65,7 +65,7 @@ def load(path, min_round_frames=120):
                 row = json.loads(line)
             except json.JSONDecodeError:  # half-written last line (file still recording / cut off)
                 continue
-            if "names_probe" in row:
+            if "names_probe" in row or "dataset" in row:  # header rows (a dataset recording has one, no hashes)
                 probes.append(row)
                 continue
             if row.get("reset"):

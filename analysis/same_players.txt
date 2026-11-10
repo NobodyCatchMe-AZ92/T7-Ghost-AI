@@ -1,0 +1,2 @@
+# The same person under two pseudonyms (analysis/build_profiles.py): <merged> <kept>, the player's own word.
+P29 P19   # top Kazumi (live 15 Oct) and top Negan (saved replays 13 Oct): one person (author, 2026-11-01)

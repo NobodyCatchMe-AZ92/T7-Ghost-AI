@@ -82,6 +82,9 @@ into the anonymous codes in your data - with that key, someone could check guess
 codes. The data folders themselves contain only gameplay (moves, positions, health, inputs) with
 players as codes: nothing about you, your PC or your Steam account.
 
+Volunteered data becomes part of the public **Ghost dataset** (see below), so anyone can keep improving
+the Ghosts: the codes are removed first and every player becomes a number (P01, P02, ...).
+
 PLEASE HELP MAKE THIS MOD BETTER! IT DEPENDS ON BEING FED LOTS OF DATA - WHICH I CAN'T DO ALONE! We can
 improve the Tekken 7 offline experience into something truly fun, starting with this mod!
 
@@ -110,6 +113,19 @@ Thank you!
    each fighter's back is from a wall - and plays accordingly.
 
 See [docs/TECHNICAL.md](docs/TECHNICAL.md) for the memory layout, file formats, wall maps and pipeline.
+
+## The Ghost dataset (open data)
+
+Every Ghost is built from one public, anonymised dataset: every recorded match (saved replays and online
+matches), the Practice demonstrations behind the combo routes, punishes and taunts, and the wall-survey laps.
+Players are numbers only (P01, P02, ...) - no names, name codes, accounts or regions. It is attached to the
+GitHub releases as `T7-Ghost-AI-dataset-<version>.zip`; [dataset/manifest.tsv](dataset/manifest.tsv) lists
+every recording with its checksum ([dataset/SHA256SUMS](dataset/SHA256SUMS) for the zip).
+
+From the dataset alone, the shipped profiles, frame data and wall maps can be rebuilt byte for byte, and new
+recordings can be added with `tools/add_recordings.py`. If this project is ever left unmaintained, everything
+needed to carry it on is here: [docs/MAINTAINING.md](docs/MAINTAINING.md) (how to add Ghosts and release),
+[docs/DATASET.md](docs/DATASET.md) (the data) and [docs/TECHNICAL.md](docs/TECHNICAL.md) (how it all works).
 
 ## What's new
 The full list of changes in every version is in [CHANGELOG.md](CHANGELOG.md).
@@ -244,9 +260,12 @@ The full list of changes in every version is in [CHANGELOG.md](CHANGELOG.md).
 | `src/menutrace.hpp` | dev-build recon tools for the game's Scaleform menus |
 | `src/harvest.cpp` | the shareable read-only harvesters (replay / live) |
 | `src/t7.hpp`, `src/names.hpp` | Tekken 7 memory layout; player-name pseudonymisation |
-| `analysis/` | Python: load recordings (replay and live), build profiles, frame data and wall maps; combo routes and punishes from Practice demonstrations |
-| `tools/` | ini writer, wall-survey checker, replay auto-pilot, memory peek/sampler helpers |
-| `dist/t7ghost.ini`, `dist/walls.txt` | default settings and the stage wall maps shipped with releases |
+| `analysis/` | Python: load recordings (replay and live) or the dataset, build profiles, frame data and wall maps; combo routes and punishes from Practice demonstrations |
+| `tools/` | dataset intake (`add_recordings.py`), ini writer, wall-survey checker, replay auto-pilot, memory peek/sampler helpers; `tools/release/` learned-frame-data cleaner and privacy scan |
+| `docs/` | `TECHNICAL.md` (how everything works), `DATASET.md` (the open data), `MAINTAINING.md` (carrying the project on) |
+| `dataset/` | the dataset's manifest and checksums (the recordings themselves are a release download) |
+| `dist/t7ghost.ini`, `dist/walls.txt`, `dist/learned_framedata.txt` | default settings, the stage wall maps and the learned punish windows shipped with releases |
+| `dist/README.txt`, `dist/README_harvesters.txt` | the readmes inside the download |
 | `dist/combos/` | the recorded combo routes (`routes_<char>.txt`), punishes (`punishes_<char>.txt`) and taunts (`taunts_<char>.txt`) |
 | `CHANGELOG.md` | what changed in each version |
 | `third_party/` | MinHook (BSD-2), Dear ImGui (MIT) |
@@ -260,22 +279,29 @@ build.bat           -> build\dinput8.dll (dev build) and build\public\dinput8.dl
 build_harvest.bat   -> build\harvest_replay\dinput8.dll and build\harvest_live\dinput8.dll
 ```
 
-Profiles and maps (Python 3.12, standard library only):
+Profiles and maps (Python 3.12, standard library only), from the unzipped dataset:
 
 ```
-py analysis/build_profiles.py <recordings dir> [<more dirs, e.g. live data>] <profiles out dir>
-py analysis/framedata.py      <recordings dir> [<more dirs>] <framedata.txt>
-py analysis/build_walls.py    <walls_survey.txt> <walls.txt>
-py analysis/combos.py         <combo recordings dir>     (routes_<char>.txt)
-py analysis/punishes.py       <combo recordings dir>     (punishes_<char>.txt)
-py analysis/taunts.py         <combo recordings dir>     (taunts_<char>.txt: the winner's inputs after a KO)
+py -I analysis/build_profiles.py <dataset> <profiles out dir>
+py -I analysis/framedata.py      <dataset> <framedata.txt>
+py -I analysis/build_walls.py    <dataset>/walls/walls_survey.txt.gz <walls.txt>
+py -I analysis/combos.py         <combo recordings>     (candidates; routes_<char>.txt are hand-picked)
+py -I analysis/punishes.py       <combo recordings>     (punishes_<char>.txt)
+py -I analysis/taunts.py         <combo recordings>     (taunts_<char>.txt: the winner's inputs after a KO)
+py -I tools/add_recordings.py    <dataset> <new recordings folder> --registry <your private registry.json>
 ```
 
 ## Privacy
 
 No player names are ever stored. Name-like strings are hashed in-process with a random key that never
-leaves the recording PC; profiles use pseudonyms (P01, P02, ...). Recordings, profiles and other
-training data are not part of this repository.
+leaves the recording PC; the public dataset and the profiles use pseudonyms only (P01, P02, ...) - the
+name codes are removed before anything is published. Keep your own `salt.bin` (`t7GhostHarvest_private`)
+and `registry.json` private.
+
+## License
+
+MIT - see [LICENSE](LICENSE). This covers the code and the Ghost dataset. Third-party code keeps its own
+license (`third_party/`).
 
 ## Credits
 

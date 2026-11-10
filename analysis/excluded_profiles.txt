@@ -1,0 +1,4 @@
+# Profiles left out of the build (one pseudonym per line). Pseudonyms are stable, so a name here stays out
+# on every rebuild. Reason after the #.
+Kazuya-P28  # plays poorly; diluted the merged Kazuya (author's call, 2026-10-19)
+Claudio-P39  # plays very poorly; muddied the merged Claudio (author's call, 2026-10-26)

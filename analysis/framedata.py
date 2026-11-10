@@ -122,8 +122,13 @@ if __name__ == "__main__":
     from load import load_dir
     from build_profiles import unique_recordings
     # framedata.py <recordings dir> [<more dirs> ...] <framedata.txt>
+    # framedata.py <dataset folder> <framedata.txt>   (the public dataset, docs/DATASET.md)
+    from dataset import is_dataset, load_dataset
     rep_dirs, out = sys.argv[1:-1], sys.argv[-1]
-    recs = unique_recordings([r for d in rep_dirs for r in load_dir(d)])
+    if len(rep_dirs) == 1 and is_dataset(rep_dirs[0]):
+        recs = [rec for rec, _, _ in load_dataset(rep_dirs[0])]
+    else:
+        recs = unique_recordings([r for d in rep_dirs for r in load_dir(d)])
     table = build(recs)
     write(table, out)
     print(f"{len(table)} moves over {len({c for c, _ in table})} characters -> {out}")
