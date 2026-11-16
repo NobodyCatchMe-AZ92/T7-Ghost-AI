@@ -1,4 +1,4 @@
-T7 GHOST AI - v1.2a PUBLIC BUILD  (by t7ghostauthor)
+T7 GHOST AI - v1.3a PUBLIC BUILD  (by t7ghostauthor)
 =====================================================
 
 Tekken 7's offline CPU replaced by "Ghosts": AI opponents that learned from real players' matches. They
@@ -11,6 +11,22 @@ This build ships Ghosts for 40 characters (77 recorded players):
   Lee, Lei, Leo, Lili, Lucky Chloe, Marduk, Miguel, Negan, Noctis, Paul, Shaheen, Steve, Xiaoyu,
   Yoshimitsu, Zafina.
 Characters without a Ghost play as the game's normal CPU.
+
+NEW IN v1.3a
+  - WARMUP ANIMATIONS (on by default, offline): at the start of certain rounds the fighters play a
+    warmup animation, like in Tekken 3 and Tekken 8 - every character has at least one.
+  - WARMUP CINEMATIC ANGLES (on by default, online friendly): new round start cameras to go with the
+    warmups, like Tekken 8's; the lifebars and P1 / P2 markers fade in.
+  - TIMER AWARENESS: in a round's last 9 seconds a Ghost behind on life presses you, a Ghost ahead
+    holds its lead (backdashes, guards). WALL AWARENESS: with its back to a wall but you far away,
+    a Ghost comes out instead of hiding.
+  - GHOST BATTLE uses your Game Options time limit too (it used to be 60 seconds always).
+  - END-OF-MATCH MENU: works with a keyboard and no controller, follows your button settings, plays
+    the game's menu sounds; Choose a specific Opponent no longer gets stuck in the CPU list.
+  - NEW F1 SECTION "HUD & Screen Modifiers": Camera Distance / height, Lifebar HUD X / Y / Size, and
+    new: Round Messages X / Y / Size (Round 1, Fight!, K.O. ...), Hide P1/P2 Marker HUD.
+  - "Testing Hotkeys" in F1 (off by default): warmup test keys and the pose tools.
+  - The mod file also works renamed to winmm.dll, version.dll, dsound.dll or xinput1_3.dll.
 
 NEW IN v1.2a
   - EDDY AND ZAFINA GET GHOSTS (40 characters, 77 recorded players), with recorded punishes and
@@ -137,12 +153,13 @@ WHERE THE GHOSTS PLAY
   Each can be switched off in the F1 panel.
 
 GHOST BATTLE MODE  (Treasure Battle reworked - the main menu calls it GHOST BATTLE)
-  - Matches use the round count from your Game Options (Treasure Battle normally forces first to 2).
+  - Matches use the round count and the time limit from your Game Options (Treasure Battle normally
+    forces first to 2 and 60 seconds).
   - A random stage every fight.
   - Opponents are only characters with a Ghost - taken from the game's own ranked ghosts (any rank),
     so they keep their names and custom outfits.
-  - END-OF-MATCH MENU after every win or loss, in the game's own result window (controller: up/down,
-    left/right, A; keyboard: arrows, Enter):
+  - END-OF-MATCH MENU after every win or loss, in the game's own result window (controller or keyboard,
+    with your own button settings: up/down, left/right, confirm; the game's menu sounds):
         Rematch < Same stage | New stage >     same opponent; left/right picks the stage
         Next Opponent: < x >                   left/right to choose one of three different characters
         Choose a specific Opponent and Stage   the game's Simple Select screen: the Ghost and its
@@ -151,11 +168,30 @@ GHOST BATTLE MODE  (Treasure Battle reworked - the main menu calls it GHOST BATT
         Return to Main Menu
   - No treasure chest icons on the match HUD (your rewards still show after the match).
   - Options in the F1 panel (Ghost Battle Mode): Random stage, Only enable Ghost AI Characters,
-    Costumes (+ Customization slot to force on Ghosts), End-of-match menu (+ Native look; untick it
+    Costumes (+ Customization slot to force on Ghosts), End-of-match menu (+ Native look menu; untick it
     for the overlay version), Call it GHOST BATTLE, Hide treasure chests, Random player per ghost
     (each Ghost imitates one recorded player instead of all of them merged), and Special fights per
     kind (Boss, Turbo, Heist, Double Damage, Aerial Juggle; all off by default).
   Treasure Battle's own rewards and progress are left untouched.
+
+WARMUP ANIMATIONS AND CINEMATIC ANGLES  (F1 > Game Modifiers, on by default)
+  - WARMUP ANIMATIONS (offline battles only): during "Round N ... Fight!" the fighters play a warmup animation for the
+    situation - Round 1, one win from the match (up), one loss from losing it (down), final round -
+    instead of standing in their stance, then ease into their stance by "Fight!". 51 characters have
+    at least one (every character). They live in Win64\t7ghost\warmup; warmup\tuning.txt trims and blends them per
+    character (Ctrl+F9 reloads it).
+  - WARMUP CINEMATIC ANGLES: Round 1 opens with a slow forward dolly onto the fighters instead of the
+    overhead swoop; later rounds play one of several camera shots (match point, final round, three
+    variations or the game's own swoop as an adjustable shot, never the same variation twice in a row -
+    warmup\camera_shots.txt). The lifebars and the P1 / P2 markers fade in. Follows Camera Distance.
+    Online friendly: every game mode, online too (only your screen changes).
+  - HIDE P1/P2 MARKER HUD (F1 > HUD & Screen Modifiers): no P1 / P2 / YOU / CPU markers over the
+    fighters at the start of a round. Works online too (only your screen changes).
+  - Some warmups are the characters' own intro and win poses from the game. Making more: tick
+    F1 > Testing Hotkeys > Pose tools (off by default) - the mod then records intros and win poses,
+    F9 / F10 / F11 preview them offline, F12 exports the ones listed in t7ghost\pose_export.txt
+    (details: tools/warmup/POSE_EXPORT.md on the GitHub page). Testing Hotkeys > Warmup animation test
+    keys: F5-F8 play a fighter's warmups on demand (Shift = P2).
 
 IN-GAME SETTINGS PANEL  (press F1)
   F1 opens and closes the panel at any time, also mid-fight. Use the mouse:
@@ -166,16 +202,22 @@ IN-GAME SETTINGS PANEL  (press F1)
   - Guard skill, Decision skill, Adapt to you, Throw breaks
   - Punishment Proficiency   chance of a perfect punish (0% = the players' own punishing)
   - Combos              own habits / finish when appropriate / always finish
-  - Wall awareness      sidesteps away from walls, defends corners, presses you into walls
-                        (shows what it currently thinks about the walls)
+  - Wall awareness      sidesteps away from walls, defends corners, presses you into walls; with
+                        its back to a wall but you 3.25 m or more away it comes out to approach
+                        (shows what it currently thinks about the walls, and the distance)
+  - Timer awareness     the last 9 seconds of a round: behind on life, it pressures you (quick
+                        strikes, lows, throws, plus-on-block moves); ahead, it holds the lead
+                        (backdashes, guards). Wall awareness comes first.
   - Ghost Battle Mode   the options above (Costumes: Treasure Battle's CPU outfits / 1P only / 1P-4P /
                         Presets / your own customizations / Random; customization slot to force)
-  - Game Modifiers      No Rage, No Power Crush, No Screw, No Wall Bound, Health 25-500%, Backdash
-                        Distance, Sidestep Distance (offline only; immediately, Health per round);
-                        Camera Distance, Camera Height Offset, Lifebar HUD X / Y / Size (every mode,
-                        online too - only your own screen changes)
-  - Imitation Settings  per character: merged (default, all recorded players as one), hybrid, or
-                        one recorded player only
+  - Ghost Imitation Settings  per character: merged (default, all recorded players as one), hybrid,
+                        or one recorded player only
+  - Game Modifiers      No Rage, No Power Crush, No Screw, No Wall Bound, Warmup Animations, Health
+                        25-500%, Backdash Distance, Sidestep Distance (offline only; immediately,
+                        Health per round); Warmup Cinematic Angles (online friendly)
+  - HUD & Screen Modifiers  Camera Distance, Camera Height Offset, Lifebar HUD X / Y / Size, Round
+                        Messages X / Y / Size (Round 1, Fight!, K.O. ...), Hide P1/P2 Marker HUD
+                        (every mode, online too - only your own screen changes)
   - PLEASE HELP!        how you can help: send play data recorded with the Data Harvesters
   - Reset to defaults / Forget my habits
   Changes take effect immediately and are saved to Win64\t7ghost\t7ghost.ini. The panel shows
@@ -212,8 +254,9 @@ TROUBLESHOOTING  (no note in the top-left corner, or F1 does nothing)
         dinput8.dll.dll).
       * Steam Deck / Linux (Proton): set the game's launch options to
             WINEDLLOVERRIDES="dinput8=n,b" %command%
-      * Another mod also needs the name dinput8.dll: the mod works under the name version.dll too -
-        rename it and start the game again.
+      * Another mod also needs the name dinput8.dll: the mod works under the names winmm.dll,
+        version.dll, dsound.dll and xinput1_3.dll too - rename it to one that is free and start the
+        game again. Also try another name if the game does not load dinput8.dll on your PC.
   - The log says "unsupported game build": the mod only works with the latest Steam version of
     TEKKEN 7. Update the game, or verify its files in Steam (Properties > Installed Files). A message
     box says so when the game starts.
@@ -233,4 +276,6 @@ NOTES
   - Not affiliated with or endorsed by Bandai Namco. Tekken is a trademark of Bandai Namco
     Entertainment Inc.
   - Uses MinHook (BSD 2-clause) and Dear ImGui (MIT) - see THIRD_PARTY_LICENSES.txt.
+  - The warmup converters (tools/warmup, not needed to play) use kiloutre's
+    BlenderTekkenAnimationImporter and a Tekken 7 mannequin .blend in Blender; neither is included.
   - Updates: https://github.com/NobodyCatchMe-AZ92/T7-Ghost-AI or tekkenmods.com

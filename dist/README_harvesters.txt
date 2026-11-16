@@ -86,7 +86,8 @@ PRIVACY
 
 IF NOTHING HAPPENS
   - On some Windows installations, or when another mod already uses the name dinput8.dll, rename the
-    harvester's dinput8.dll to version.dll - it works under either name.
+    harvester's dinput8.dll to winmm.dll, version.dll, dsound.dll or xinput1_3.dll - it works under
+    any of these names.
   - Steam Deck / Linux (Proton): set the game's launch options to
         WINEDLLOVERRIDES="dinput8=n,b" %command%
 
