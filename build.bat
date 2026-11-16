@@ -12,16 +12,16 @@ cl /nologo /std:c++20 /O2 /MT /EHsc /W3 /c /DNDEBUG /DUNICODE /D_UNICODE /I%IG% 
    %IG%\imgui.cpp %IG%\imgui_draw.cpp %IG%\imgui_tables.cpp %IG%\imgui_widgets.cpp %IG%\backends\imgui_impl_dx11.cpp %IG%\backends\imgui_impl_win32.cpp || exit /b 1
 set OBJS=build\hook.obj build\buffer.obj build\trampoline.obj build\hde64.obj build\imgui.obj build\imgui_draw.obj build\imgui_tables.obj build\imgui_widgets.obj build\imgui_impl_dx11.obj build\imgui_impl_win32.obj
 set INC=/Ithird_party\minhook\include /I%IG% /I%IG%\backends
-set LIBS=user32.lib winmm.lib bcrypt.lib d3d11.lib d3dcompiler.lib gdi32.lib dwmapi.lib
+set LIBS=user32.lib bcrypt.lib d3d11.lib d3dcompiler.lib gdi32.lib dwmapi.lib
 cl /nologo /std:c++20 /O2 /MT /EHsc /W3 /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX %INC% ^
-   src\main.cpp src\proxy_version.cpp %OBJS% ^
+   src\main.cpp src\proxy_multi.cpp %OBJS% ^
    /Fobuild\ /Fdbuild\ /Zi /LD /Fe:build\dinput8.dll ^
-   /link /DEF:src\version.def /DEBUG /OPT:REF /OPT:ICF %LIBS% || exit /b 1
+   /link /DEF:src\proxy.def /DEBUG /OPT:REF /OPT:ICF %LIBS% || exit /b 1
 echo built build\dinput8.dll
 rem public build (T7_PUBLIC): AI + learning + settings panel only, no recorders/traces/dev hotkeys, no debug symbols
 if not exist build\public mkdir build\public
 cl /nologo /std:c++20 /O2 /MT /EHsc /W3 /DNDEBUG /DT7_PUBLIC /DUNICODE /D_UNICODE /DWIN32_LEAN_AND_MEAN /DNOMINMAX %INC% ^
-   src\main.cpp src\proxy_version.cpp %OBJS% ^
+   src\main.cpp src\proxy_multi.cpp %OBJS% ^
    /Fobuild\public\ /LD /Fe:build\public\dinput8.dll ^
-   /link /DEF:src\version.def /OPT:REF /OPT:ICF %LIBS% || exit /b 1
+   /link /DEF:src\proxy.def /OPT:REF /OPT:ICF %LIBS% || exit /b 1
 echo built build\public\dinput8.dll

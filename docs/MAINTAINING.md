@@ -79,7 +79,8 @@ clean the installed copy and ship that: `py -I tools/release/clean_learned.py <i
    T7 Ghost Mod <ver>/  CHANGELOG.md, README.txt (dist/README.txt), THIRD_PARTY_LICENSES.txt,
                         Win64/dinput8.dll (build\public), Win64/t7ghost/ {t7ghost.ini (dist), framedata.txt, walls.txt,
                         learned_framedata.txt (cleaned), profiles/*.t7p + index.txt,
-                        combos/ routes_*.txt punishes_*.txt taunts_*.txt (no *_candidates.txt)}
+                        combos/ routes_*.txt punishes_*.txt taunts_*.txt (no *_candidates.txt),
+                        warmup/ (dist/warmup: the *.bin animations, tuning.txt, camera_shots.txt)}
    Data Harvesters (for gathering and volunteering your own ghost data)/  the two Harvester DLLs + README
    ```
 4. The dataset: zip it (`T7-Ghost-AI-dataset-<version>.zip`: `manifest.tsv`, `recordings/`, `combos/`, `walls/`),

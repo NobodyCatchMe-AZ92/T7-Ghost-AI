@@ -1,5 +1,6 @@
-// Start-up checks shared by the mod and the harvesters (2026-10-23). The DLL ships as dinput8.dll and
-// still works as version.dll (proxy_version.cpp). Called from DllMain before anything else starts.
+// Start-up checks shared by the mod and the harvesters (2026-10-23). The DLL ships as dinput8.dll and also works
+// as winmm.dll, version.dll, dsound.dll or xinput1_3.dll (proxy_multi.cpp, 2026-11-16 - the T7 Jukebox's proxy,
+// author's request). Called from DllMain before anything else starts.
 #pragma once
 #include <windows.h>
 #include <string>
@@ -7,8 +8,7 @@
 
 namespace loader {
 
-// One copy per process: when both dinput8.dll and version.dll of ours are installed, the second to load
-// stays idle. The event stays open for the process's lifetime.
+// One copy per process: when two of ours are installed under different names, the second to load stays idle. The event stays open for the process's lifetime.
 inline bool first_in_process()
 {
 	wchar_t name[64];
@@ -62,6 +62,18 @@ inline bool old_version_dll_next_to(HMODULE self)
 	d.resize(got);
 	const bool ours = contains(d, "t7ghost", false) || contains(d, "t7ghost", true);
 	return ours && !contains(d, "GetdfDIJoystick", false);
+}
+
+// timeBeginPeriod from System32's winmm.dll, looked up at run time: the DLL no longer links winmm.lib, because
+// named winmm.dll it would import from itself (2026-11-16)
+inline void time_begin_period(UINT ms)
+{
+	wchar_t path[MAX_PATH];
+	GetSystemDirectoryW(path, MAX_PATH);
+	lstrcatW(path, L"\\winmm.dll");
+	if (HMODULE m = LoadLibraryW(path))
+		if (auto f = reinterpret_cast<UINT(WINAPI *)(UINT)>(GetProcAddress(m, "timeBeginPeriod")))
+			f(ms);
 }
 
 // A message box on its own thread (DllMain must not wait on it).

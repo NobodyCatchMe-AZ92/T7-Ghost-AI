@@ -60,7 +60,7 @@ Available for download (see Releases):
 
 One zip with two folders - pick one:
 
-**T7 Ghost Mod 1.2a** - the Ghost AI with every Ghost (40 characters). Drop the contents of its `Win64`
+**T7 Ghost Mod 1.3a** - the Ghost AI with every Ghost (40 characters). Drop the contents of its `Win64`
 folder into `TEKKEN 7\TekkenGame\Binaries\Win64` (next to the game exe), then play Ghost Battle (the
 reworked Treasure Battle), Arcade Battle, or Practice with the opponent set to "CPU" on "Ultra Hard".
 Press F1 to tune the Ghosts in real time. Its README.txt explains everything; CHANGELOG.md lists what
@@ -129,6 +129,23 @@ needed to carry it on is here: [docs/MAINTAINING.md](docs/MAINTAINING.md) (how t
 
 ## What's new
 The full list of changes in every version is in [CHANGELOG.md](CHANGELOG.md).
+
+### What's new in v1.3a
+- **Warmup Animations** (F1 > Game Modifiers, on by default, offline): at the start of certain rounds the fighters
+  play a warmup animation (Round 1, match point up / down, final round), like in Tekken 3 and Tekken 8 - hands and
+  fingers included, blending into their stance by "Fight!". Every character has at least one (`dist/warmup`).
+- **Warmup Cinematic Angles** (F1 > Game Modifiers, on by default, online friendly): new round start cameras to go
+  with the warmups, like Tekken 8's - a forward dolly for Round 1, camera shots for the other rounds - and the
+  lifebars and P1 / P2 markers fade in. Editable keyframes in `warmup/camera_shots.txt`.
+- **Timer awareness** (F1 > Ghost AI Settings): in a round's last 9 seconds a Ghost behind on life presses you, a
+  Ghost ahead holds its lead. **Wall awareness**: with its back to a wall but you far away, a Ghost comes out.
+- **Ghost Battle** uses your Game Options time limit; its **end-of-match menu** works with a keyboard and no
+  controller, follows your button settings and plays the game's menu sounds; the Simple Select CPU list no longer
+  gets stuck.
+- New F1 section **HUD & Screen Modifiers**: Camera Distance / height, Lifebar HUD X / Y / Size, and new **Round
+  Messages X / Y / Size** and **Hide P1/P2 Marker HUD** (all online friendly). **Testing Hotkeys** (off by default):
+  warmup test keys and the pose tools (record / preview / export intros and win poses as warmups).
+- The DLL also works as `winmm.dll`, `version.dll`, `dsound.dll` or `xinput1_3.dll` (the Data Harvesters too).
 
 ### What's new in v1.2a
 - **Eddy and Zafina get Ghosts** (40 characters, 77 recorded players), with recorded punishes and combo
@@ -256,6 +273,8 @@ The full list of changes in every version is in [CHANGELOG.md](CHANGELOG.md).
 | `src/overlay.hpp` | in-game settings panel (Dear ImGui on the game's D3D11 swap chain) |
 | `src/ghostbattle.hpp`, `src/gbmenu.hpp` | Ghost Battle Mode (Treasure Battle hooks, costumes, special fights) and its end-of-match menu (incl. the Simple Select opponent / stage choice) |
 | `src/hud.hpp` | Lifebar HUD position and size |
+| `src/warmup.hpp`, `src/warmup_hud.hpp` | Warmup Animations and Camera Angles, lifebar / P1-P2 marker fade-in, Hide P1/P2 Marker HUD, pose preview / export (F5-F12) |
+| `tools/warmup/`, `dist/warmup/` | warmup converters (Blender) and the pose export guide; the warmup animations, `tuning.txt`, `camera_shots.txt` |
 | `src/gbtext.hpp` | the GHOST BATTLE name on the main menu |
 | `src/menutrace.hpp` | dev-build recon tools for the game's Scaleform menus |
 | `src/harvest.cpp` | the shareable read-only harvesters (replay / live) |

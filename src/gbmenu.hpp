@@ -61,14 +61,34 @@ WORD script_buttons(ULONGLONG now, bool &done)
 }
 
 void native_tick();
+std::atomic<bool> g_in_hooked{ false }; // the dialog's menu input is hooked (see in_trig_hook)
+// native_tick at most once a frame (8 ms), from whichever game-thread caller comes first. Keyboard only (author
+// 2026-11-16): with no pad connected the game polls XInput only now and then, so the XInput poll alone ran it
+// rarely (Simple Select never opened, the native rows lagged). Also called from the result dialog's per-frame
+// update (dlg_update_hook) and from the fighters' frames (main.cpp decode hook).
+void native_tick_guarded()
+{
+	static LARGE_INTEGER freq{}, last{};
+	if (!freq.QuadPart)
+		QueryPerformanceFrequency(&freq);
+	LARGE_INTEGER now;
+	QueryPerformanceCounter(&now);
+	if (last.QuadPart && (now.QuadPart - last.QuadPart) * 1000 < freq.QuadPart * 8)
+		return;
+	last = now;
+	native_tick();
+}
 
 DWORD WINAPI xi_hook(DWORD i, XINPUT_STATE *s)
 {
 	const DWORD r = g_xi_orig(i, s);
 	if (i == 0)
-		native_tick();
+		native_tick_guarded();
 	const int st = g_state;
-	if (r != ERROR_SUCCESS || !s || st == kIdle || st == kSimple) // Simple Select reads the pads itself
+	// Simple Select reads the pads itself. With the dialog's menu input hooked (in_rep_hook / in_trig_hook) the pads
+	// pass through too: our menu reads them from the game's merged input and the window gets nothing (author
+	// 2026-11-16: a pad connected mid-match could not move or confirm the menu while this still blanked it)
+	if (r != ERROR_SUCCESS || !s || st == kIdle || st == kSimple || g_in_hooked)
 		return r;
 	bool done;
 	const WORD btn = st == kPress && int(i) == g_pad ? script_buttons(GetTickCount64(), done) : 0;
@@ -161,6 +181,73 @@ void __fastcall cursor_hook(uintptr_t dlg, int idx)
 		g_dialog = dlg, ++g_cursor_seq;
 }
 
+// Menu input (2026-11-16, author: with a keyboard and no pad the game's own 2-button window ran under ours - its
+// cursor moved (each move rebuilt our rows), it confirmed its own option ("End Treasure Battle" -> main menu), and
+// left / right did nothing; blocking pads / scripted A presses through XInput never touch the keyboard). The dialog
+// update (exe+0x49D120) reads abstract menu buttons - keyboard, pads and the player's bindings merged - through two
+// getters: exe+0x49D480(dlg, &mask) = held with auto-repeat (cursor moves; input manager +0xA0 per player, via
+// 0x3ED510) and exe+0x49D540(dlg, &mask) = pressed (+0x9C via 0x3ED5F0; confirm = bit 12, test 0x2C3ED0 with the
+// options object set). Bits 0-3 = up, down, left, right (the cursor mover 0x2C42D0 takes bits 0 / 1; 0x3ED510 drops
+// bit 1 with bit 0 held and bit 3 with bit 2). While our menu is open on the Treasure result window both return 0 to
+// the dialog and the pressed bits go to our menu (tick); to confirm we set the dialog's index (+0xB4 / +0xE4, as its
+// own cursor does) and hand it the confirm bit.
+constexpr uint32_t kInUp = 1, kInDown = 2, kInLeft = 4, kInRight = 8, kInConfirm = 0x1000;
+using InGetFn = uint32_t *(__fastcall *)(uintptr_t, uint32_t *);
+InGetFn g_in_rep_orig = nullptr, g_in_trig_orig = nullptr;
+std::atomic<uint32_t> g_in_trig{ 0 }; // pressed bits for our menu (game thread -> tick)
+std::atomic<int> g_press_idx{ -1 };    // the native option to confirm: 0 = next match / start over, 1 = end
+bool in_ours()
+{
+	const int st = g_state;
+	return (st == kOpen || st == kPress) && t7::read_global(t7::kBattleType) == t7::kBattleTreasure && t7::read_global(kResultMenu) != 0;
+}
+uint32_t *__fastcall in_rep_hook(uintptr_t dlg, uint32_t *out)
+{
+	uint32_t *r = g_in_rep_orig(dlg, out);
+	if (in_ours())
+		*out = 0; // the game's cursor never moves under our menu
+	return r;
+}
+uint32_t *__fastcall in_trig_hook(uintptr_t dlg, uint32_t *out)
+{
+	uint32_t *r = g_in_trig_orig(dlg, out);
+	if (!in_ours())
+		return r;
+	if (g_state == kOpen)
+	{
+		if (const uint32_t m = *out)
+		{
+			g_in_trig.fetch_or(m);
+			static int logged = 0;
+			if (logged < 12)
+				++logged, logf("gbm: menu input 0x%X", m);
+		}
+		*out = 0;
+		return r;
+	}
+	bool done; // kPress: our confirm, on the option we chose
+	const WORD b = script_buttons(GetTickCount64(), done);
+	uint32_t m = 0;
+	if (b & XINPUT_GAMEPAD_A)
+	{
+		const int idx = g_press_idx;
+		if (idx >= 0)
+			*reinterpret_cast<int32_t *>(dlg + 0xB4) = idx, *reinterpret_cast<int32_t *>(dlg + 0xE4) = idx;
+		m = kInConfirm;
+	}
+	*out = m;
+	return r;
+}
+// the result dialog's per-frame update (also while it waits on its timer +0xC8, e.g. under Simple Select)
+using DlgUpdateFn = void(__fastcall *)(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+DlgUpdateFn g_dlg_update_orig = nullptr;
+void __fastcall dlg_update_hook(uintptr_t dlg, uintptr_t a2, uintptr_t a3, uintptr_t a4)
+{
+	if (t7::read_global(t7::kBattleType) == t7::kBattleTreasure && t7::read_global(kResultMenu) != 0)
+		native_tick_guarded();
+	g_dlg_update_orig(dlg, a2, a3, a4);
+}
+
 uintptr_t dlg_wrapper()
 {
 	uintptr_t w = 0;
@@ -243,6 +330,7 @@ bool native_build(uintptr_t w)
 constexpr uintptr_t kSsCreate = 0x3F25B0, kSsDestroy = 0x556440, kCharSelectOwner = 0x34D5B90, kOwnerVtable = 0x27DE610;
 struct SsResult { int p1_char = -1, p1_slot = 0, p1_side = 0, cpu_char = -1, cpu_slot = 0, cpu_side = 0; bool cancelled = true; };
 uintptr_t g_ss_obj = 0, g_ss_owner = 0;
+int g_ss_cpu_last = -1; // the CPU list position char_refresh_hook last settled on (game thread; -1 = none yet)
 bool ss_open()
 {
 	const uintptr_t base = t7::exe_base();
@@ -253,6 +341,7 @@ bool ss_open()
 		return false;
 	}
 	g_ss_owner = uintptr_t(own);
+	g_ss_cpu_last = -1;
 	g_ss_obj = gb::fn<uintptr_t(__fastcall *)(uintptr_t)>(kSsCreate)(g_ss_owner + 0x50);
 	if (g_ss_obj)
 		*reinterpret_cast<volatile uint8_t *>(g_ss_obj + 0x640) = 1;
@@ -361,15 +450,32 @@ void __fastcall char_refresh_hook(uintptr_t obj, int panel)
 		pos != shown && t7::rd(obj + 0x680, count) && count > 0 && count < 256)
 	{
 		const int n = int(count);
-		int step = pos - shown;
-		step = (step == 1 || step < -1) ? 1 : -1; // +1, or a wrap from the end to the start = right
+		// direction (author 2026-11-16: after a skip, e.g. left from Lee over Law to Lars, right from Lars stuck -
+		// the old guess from +0x224 said "left", since +0x224 does not follow our skip): the left / right handler
+		// (exe+0x479E2D / 0x479E76) steps +0x220 by one from where WE put it, so compare with our own last position
+		int step;
+		const int last = g_ss_cpu_last;
+		if (last >= 0 && last < n && pos != last)
+		{
+			const int d = (pos - last + n) % n;
+			step = d <= n / 2 ? 1 : -1;
+		}
+		else
+		{
+			step = pos - shown;
+			step = (step == 1 || step < -1) ? 1 : -1; // +1, or a wrap from the end to the start = right
+		}
 		int k = 0;
 		const int asked = pos;
 		while (k++ < n && !b->profiles.count(ss_char_at(obj, pos)))
 			pos = (pos + step + n) % n;
 		*reinterpret_cast<volatile int32_t *>(p + 0x220) = pos;
+		if (pos == shown) // the refresh would see nothing to do: -1 = "refresh", as the game sets it (exe+0x47A8A4)
+			*reinterpret_cast<volatile int32_t *>(p + 0x224) = -1;
+		g_ss_cpu_last = pos;
 		if (pos != asked)
-			logf("simple select: CPU list position %d (char %d) -> %d (char %d, a Ghost)", asked, ss_char_at(obj, asked), pos, ss_char_at(obj, pos));
+			logf("simple select: CPU list position %d (char %d) -> %d (char %d, a Ghost; from %d, step %+d, shown %d)", asked,
+				ss_char_at(obj, asked), pos, ss_char_at(obj, pos), last, step, shown);
 	}
 	g_char_refresh_orig(obj, panel);
 }
@@ -459,10 +565,27 @@ void simple_tick() // game thread, while g_state == kSimple
 	press({ { 0, 150 }, { XINPUT_GAMEPAD_A, 120 }, { 0, 300 } }, kPress);
 }
 
-// game thread, once per XInput poll of pad 0
+// The game's menu sounds (author 2026-11-16: our cursor was silent, and "Choose a specific Opponent and Stage" had no
+// confirm sound - the other options confirm through the game's window, which plays its own). The dialog update plays
+// them as exe+0x441270(exe+0x440D10(), id): 0x111 = cursor move (after its cursor function, 0x49D2A9), 0x110 =
+// confirm (after Decide, 0x49D2F9). Requested from tick() (render thread), played here on the game thread.
+std::atomic<bool> g_snd_move{ false }, g_snd_ok{ false };
+void ui_sound(int id)
+{
+	const uintptr_t m = gb::fn<uintptr_t(__fastcall *)()>(0x440D10)();
+	if (m)
+		gb::fn<uint64_t(__fastcall *)(uintptr_t, int)>(0x441270)(m, id);
+}
+
+// game thread, once a frame (native_tick_guarded)
 void native_tick()
 {
+	if (g_snd_move.exchange(false))
+		ui_sound(0x111);
+	if (g_snd_ok.exchange(false))
+		ui_sound(0x110);
 	hud::tick();
+	warmup_hud::tick();
 #ifndef T7_PUBLIC
 	ss_test_tick();
 #endif
@@ -554,6 +677,7 @@ void open(ghost::Brain *b)
 	for (auto &x : g_sub)
 		x = 0;
 	g_sel = 0, g_chosen = -1, g_armed = false;
+	g_in_trig = 0, g_press_idx = -1;
 	g_open_t = GetTickCount64();
 	g_state = kOpen;
 	logf("gbm: end-of-match menu open (%zu next opponents, %zu rows)", std::min<size_t>(chars.size(), 3), g_rows.size());
@@ -611,6 +735,7 @@ void __fastcall invq_hook(uintptr_t w, const char *method, GVal *args, int argc)
 		return;
 	}
 	g_invq_orig(w, method, args, argc);
+	hud::msg_seen(w); // round messages (hud.hpp)
 }
 
 void __fastcall build_hook(uintptr_t dlg)
@@ -649,6 +774,7 @@ void confirm(ghost::Brain *b)
 	if (it.action == kSpecific)
 	{
 		logf("gbm: chose \"%s\" - opening Simple Select", it.label.c_str());
+		g_snd_ok = true; // the window does not confirm here, so no sound of its own
 		g_ss_want = true;
 		g_state = kSimple;
 		return;
@@ -668,7 +794,15 @@ void confirm(ghost::Brain *b)
 	constexpr WORD A = XINPUT_GAMEPAD_A, DOWN = XINPUT_GAMEPAD_DPAD_DOWN;
 	if (it.action == kCharSelect)
 		g_cs_armed = GetTickCount64(); // "End Treasure Battle", then the scene it asks for becomes Character Select
-	if (it.action == kMainMenu || it.action == kCharSelect)
+	const bool second = it.action == kMainMenu || it.action == kCharSelect;
+	if (g_in_hooked)
+	{
+		// the dialog's own input: index + confirm bit in in_trig_hook (keyboard or pad, no pad needed)
+		g_press_idx = second ? 1 : 0;
+		press({ { 0, 150 }, { A, 120 }, { 0, 300 } }, kPress);
+		return;
+	}
+	if (second)
 	{
 		// the native second option. Pressing Down moved the game's cursor onto its 2nd button ("Rematch on a new
 		// stage" lit up) and its cursor function made us rebuild the window (it vanished and faded back in; test
@@ -715,35 +849,49 @@ bool tick()
 			break;
 		}
 		{
-			WORD btn = 0;
-			SHORT ly = 0, lx = 0;
-			for (DWORD i = 0; i < 4; ++i)
+			bool up, down, left, right, ok;
+			if (g_in_hooked)
 			{
-				XINPUT_STATE xs{};
-				if (g_xi_orig(i, &xs) == ERROR_SUCCESS &&
-					(xs.Gamepad.wButtons || std::abs(xs.Gamepad.sThumbLY) > 16000 || std::abs(xs.Gamepad.sThumbLX) > 16000))
-					btn |= xs.Gamepad.wButtons, ly = xs.Gamepad.sThumbLY, lx = xs.Gamepad.sThumbLX, g_pad = int(i);
+				// the game's own menu input (keyboard, pads, the player's bindings), as single presses: the
+				// previous-state checks below see each one as new
+				const uint32_t t = g_in_trig.exchange(0);
+				up = t & kInUp, down = t & kInDown, left = t & kInLeft, right = t & kInRight, ok = t & kInConfirm;
+				g_prev_up = g_prev_down = g_prev_left = g_prev_right = g_prev_ok = false;
+				if (!g_armed) // presses from before the menu opened are dropped
+					g_armed = true, up = down = left = right = ok = false;
 			}
-			const auto key = [](int vk) { return game_focused() && (GetAsyncKeyState(vk) & 0x8000) != 0; };
-			const bool up = (btn & XINPUT_GAMEPAD_DPAD_UP) || ly > 16000 || key(VK_UP);
-			const bool down = (btn & XINPUT_GAMEPAD_DPAD_DOWN) || ly < -16000 || key(VK_DOWN);
-			const bool left = (btn & XINPUT_GAMEPAD_DPAD_LEFT) || lx < -16000 || key(VK_LEFT);
-			const bool right = (btn & XINPUT_GAMEPAD_DPAD_RIGHT) || lx > 16000 || key(VK_RIGHT);
-			const bool ok = (btn & XINPUT_GAMEPAD_A) || key(VK_RETURN);
+			else // fallback: pads directly + arrow keys / Enter
+			{
+				WORD btn = 0;
+				SHORT ly = 0, lx = 0;
+				for (DWORD i = 0; i < 4; ++i)
+				{
+					XINPUT_STATE xs{};
+					if (g_xi_orig(i, &xs) == ERROR_SUCCESS &&
+						(xs.Gamepad.wButtons || std::abs(xs.Gamepad.sThumbLY) > 16000 || std::abs(xs.Gamepad.sThumbLX) > 16000))
+						btn |= xs.Gamepad.wButtons, ly = xs.Gamepad.sThumbLY, lx = xs.Gamepad.sThumbLX, g_pad = int(i);
+				}
+				const auto key = [](int vk) { return game_focused() && (GetAsyncKeyState(vk) & 0x8000) != 0; };
+				up = (btn & XINPUT_GAMEPAD_DPAD_UP) || ly > 16000 || key(VK_UP);
+				down = (btn & XINPUT_GAMEPAD_DPAD_DOWN) || ly < -16000 || key(VK_DOWN);
+				left = (btn & XINPUT_GAMEPAD_DPAD_LEFT) || lx < -16000 || key(VK_LEFT);
+				right = (btn & XINPUT_GAMEPAD_DPAD_RIGHT) || lx > 16000 || key(VK_RIGHT);
+				ok = (btn & XINPUT_GAMEPAD_A) || key(VK_RETURN);
+			}
 			if (!g_armed)
 				g_armed = !up && !down && !left && !right && !ok;
 			else if (b->cfg.gb_native_menu) // 3 rows, left/right = the row's choice
 			{
 				const int n = int(g_rows.size());
-				if (up && !g_prev_up)
-					g_row = (g_row + n - 1) % n;
-				if (down && !g_prev_down)
-					g_row = (g_row + 1) % n;
+				if (up && !g_prev_up && n > 1)
+					g_row = (g_row + n - 1) % n, g_snd_move = true;
+				if (down && !g_prev_down && n > 1)
+					g_row = (g_row + 1) % n, g_snd_move = true;
 				const int r = g_row, m = int(g_rows[r].items.size());
-				if (left && !g_prev_left)
-					g_sub[r] = (g_sub[r] + m - 1) % m;
-				if (right && !g_prev_right)
-					g_sub[r] = (g_sub[r] + 1) % m;
+				if (left && !g_prev_left && m > 1)
+					g_sub[r] = (g_sub[r] + m - 1) % m, g_snd_move = true;
+				if (right && !g_prev_right && m > 1)
+					g_sub[r] = (g_sub[r] + 1) % m, g_snd_move = true;
 				sync_sel();
 				if (ok && !g_prev_ok)
 					confirm(b);
@@ -751,10 +899,10 @@ bool tick()
 			else
 			{
 				const int n = int(g_items.size());
-				if (up && !g_prev_up)
-					g_sel = (g_sel + n - 1) % n;
-				if (down && !g_prev_down)
-					g_sel = (g_sel + 1) % n;
+				if (up && !g_prev_up && n > 1)
+					g_sel = (g_sel + n - 1) % n, g_snd_move = true;
+				if (down && !g_prev_down && n > 1)
+					g_sel = (g_sel + 1) % n, g_snd_move = true;
 				if (ok && !g_prev_ok)
 					confirm(b);
 			}
@@ -865,6 +1013,22 @@ void install_native()
 	if (std::memcmp(cf, cpro, sizeof cpro) != 0 || MH_CreateHook(cf, reinterpret_cast<void *>(&char_refresh_hook),
 		reinterpret_cast<void **>(&g_char_refresh_orig)) != MH_OK || MH_EnableHook(cf) != MH_OK)
 		logf("gbm: Simple Select character hook failed (the CPU list has every character)");
+	// the dialog's menu input (keyboard + pads) and its per-frame update (2026-11-16, keyboard-only fix)
+	static const uint8_t ipro[] = { 0x40, 0x56, 0x48, 0x83, 0xEC, 0x20, 0x83, 0xB9, 0xE0, 0x00, 0x00, 0x00, 0x00 }; // push rsi; sub rsp,20h; cmp dword [rcx+0E0h],0
+	auto *ir = reinterpret_cast<void *>(t7::exe_base() + 0x49D480);
+	auto *it = reinterpret_cast<void *>(t7::exe_base() + 0x49D540);
+	if (std::memcmp(ir, ipro, sizeof ipro) == 0 && std::memcmp(it, ipro, sizeof ipro) == 0 &&
+		MH_CreateHook(ir, reinterpret_cast<void *>(&in_rep_hook), reinterpret_cast<void **>(&g_in_rep_orig)) == MH_OK &&
+		MH_CreateHook(it, reinterpret_cast<void *>(&in_trig_hook), reinterpret_cast<void **>(&g_in_trig_orig)) == MH_OK &&
+		MH_EnableHook(ir) == MH_OK && MH_EnableHook(it) == MH_OK)
+		g_in_hooked = true, logf("gbm: dialog menu input hooked (keyboard + pads)");
+	else
+		logf("gbm: dialog menu input hook failed (menu reads pads + arrow keys; keyboard may reach the game's own window)");
+	static const uint8_t upro[] = { 0x40, 0x53, 0x48, 0x83, 0xEC, 0x60, 0x80, 0xB9, 0xEF, 0x00, 0x00, 0x00, 0x00 }; // push rbx; sub rsp,60h; cmp byte [rcx+0EFh],0
+	auto *uf = reinterpret_cast<void *>(t7::exe_base() + 0x49D120);
+	if (std::memcmp(uf, upro, sizeof upro) != 0 || MH_CreateHook(uf, reinterpret_cast<void *>(&dlg_update_hook),
+		reinterpret_cast<void **>(&g_dlg_update_orig)) != MH_OK || MH_EnableHook(uf) != MH_OK)
+		logf("gbm: dialog update hook failed (without a pad the menu updates only on XInput polls)");
 	logf("gbm: dialog cursor hooked (native look)");
 }
 

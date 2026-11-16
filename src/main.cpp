@@ -44,7 +44,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 
 namespace {
 
-#define T7_VERSION_STR "1.2a" // keep in step with the t7ghost.ini header (tools/write_ini.py)
+#define T7_VERSION_STR "1.3a" // keep in step with the t7ghost.ini header (tools/write_ini.py)
 constexpr const char *kModVersion = T7_VERSION_STR;
 std::wstring g_dir; // .../Win64/t7ghost/
 FILE *g_log = nullptr;
@@ -492,6 +492,7 @@ void read_ai_values(ghost::Settings &c)
 	c.adapt = std::clamp(geti(L"ai", L"adapt", 70), 0, 100);
 	c.throw_break = std::clamp(geti(L"ai", L"throw_break_chance", 0), 0, 100);
 	c.wall_awareness = geti(L"ai", L"wall_awareness", 1) != 0;
+	c.timer_awareness = geti(L"ai", L"timer_awareness", 1) != 0;
 	// hidden option (author, 2026-10-19): not in the panel or the written ini; "taunts=0" typed into [ai]
 	// switches the Ghosts' taunts off
 	c.taunts = geti(L"ai", L"taunts", 1) != 0;
@@ -547,6 +548,9 @@ ghost::Brain *load_brain()
 	b->cfg.mod_hud_x = std::clamp(geti(L"modifiers", L"hud_x", 0), -500, 500);
 	b->cfg.mod_hud_y = std::clamp(geti(L"modifiers", L"hud_y", 0), -500, 500);
 	b->cfg.mod_hud_scale = std::clamp(geti(L"modifiers", L"hud_scale", 100), 50, 150);
+	b->cfg.mod_msg_x = std::clamp(geti(L"modifiers", L"message_x", 0), -500, 500);
+	b->cfg.mod_msg_y = std::clamp(geti(L"modifiers", L"message_y", 0), -500, 500);
+	b->cfg.mod_msg_scale = std::clamp(geti(L"modifiers", L"message_scale", 100), 50, 150);
 
 	// profiles/index.txt lists "<char> <name> <frames>" best-first; [profiles] c<char>=<name> overrides
 	const std::wstring dir = g_dir + L"profiles/";
@@ -937,6 +941,8 @@ int64_t __fastcall cam_set_hook(float *dst, const float *src)
 // a read watch on the final view's eye height, 2026-11-02): it takes the final view's distance and angle but
 // recomputes the look-at from the fighters (exe+0x72BCB0 -> +0xC0) and the eye from it (+0xB0) every frame - so it
 // keeps the Camera Distance and drops the lift. Add the lift to both after it (no tilt, nothing accumulates).
+namespace warmup { void round_cam(uintptr_t self); }
+namespace gbm { void native_tick_guarded(); } // gbmenu.hpp (included later)
 using RoundCamFn = int64_t(__fastcall *)(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 RoundCamFn g_round_cam_orig = nullptr;
 int64_t __fastcall round_cam_hook(uintptr_t self, uintptr_t a2, uintptr_t a3, uintptr_t a4)
@@ -949,6 +955,7 @@ int64_t __fastcall round_cam_hook(uintptr_t self, uintptr_t a2, uintptr_t a3, ui
 		*reinterpret_cast<volatile float *>(self + 0xB4) = eye_y + lift;
 		*reinterpret_cast<volatile float *>(self + 0xC4) = at_y + lift;
 	}
+	warmup::round_cam(self);
 	return r;
 }
 void install_cam_set()
@@ -1254,6 +1261,8 @@ void mods_tick(uintptr_t p, int idx, const ghost::Brain *b)
 	}
 }
 
+#include "warmup.hpp"
+
 std::atomic<uint32_t> g_decode_calls[3] = {}; // recon: decode_input calls for P1 / P2 / other objects
 std::atomic<uint32_t> g_decode_input[2] = {};  // recon: frames with any held input, per side
 
@@ -1267,6 +1276,10 @@ void __fastcall decode_hook(uintptr_t p, int side, uint32_t held, uint32_t press
 	ghost::Brain *b = idx >= 0 ? g_brain.load() : nullptr;
 	if (idx >= 0)
 		mods_tick(p, idx, b);
+	if (idx >= 0)
+		warmup::tick(p, idx);
+	if (idx == 0)
+		gbm::native_tick_guarded(); // HUD sliders, lifebar fade, menu: every frame even without a pad (gbmenu.hpp)
 	const int ai = b ? ai_side(b->cfg) : -1;
 	if (idx >= 0 && ai < 0 && g_ai_active.exchange(false))
 	{
@@ -1338,6 +1351,7 @@ decoded:
 
 #include "ghostbattle.hpp"
 #include "hud.hpp"
+#include "warmup_hud.hpp"
 #include "gbmenu.hpp"
 #include "gbtext.hpp"
 #ifndef T7_PUBLIC
@@ -1347,6 +1361,9 @@ decoded:
 
 bool install_hooks()
 {
+	// the warmup options (and tuning / camera shots) at startup, so the F1 panel shows the saved state in the menus
+	// too - they used to be read only when the first fight started (author 2026-11-16: checkboxes showed unticked)
+	warmup::load_ini();
 	if (MH_Initialize() != MH_OK)
 		return false;
 	auto target = reinterpret_cast<void *>(t7::exe_base() + kDecodeInput);
@@ -1372,6 +1389,7 @@ bool install_hooks()
 #ifndef T7_PUBLIC
 	mtrace::install();
 #endif
+	warmup_hud::install();
 	return true;
 }
 
@@ -1644,7 +1662,7 @@ void survey_tick()
 
 DWORD WINAPI worker(void *)
 {
-	timeBeginPeriod(1);
+	loader::time_begin_period(1);
 	logf("t7ghost v%s up. exe=%p stamp=0x%08X", kModVersion, (void *)t7::exe_base(), t7::exe_stamp());
 	if (t7::exe_stamp() != t7::kExeStamp)
 	{
@@ -1711,6 +1729,7 @@ DWORD WINAPI worker(void *)
 		g_rec.auto_mode();
 		survey_tick();
 		watch_tick();
+		warmup::worker_tick();
 		g_rec.poll();
 		if (g_rec.f && g_rec.automatic)
 		{
@@ -1734,7 +1753,7 @@ BOOL APIENTRY DllMain(HMODULE mod, DWORD reason, LPVOID)
 	if (reason == DLL_PROCESS_ATTACH)
 	{
 		DisableThreadLibraryCalls(mod);
-		// installed as both dinput8.dll and version.dll: only the first copy starts; an old version.dll of
+		// installed under two names (dinput8.dll, version.dll, winmm.dll, ...): only the first copy starts; an old version.dll of
 		// ours next to this dinput8.dll would run too - stay off and say so
 		if (!loader::first_in_process())
 			return TRUE;

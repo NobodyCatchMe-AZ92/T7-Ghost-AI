@@ -555,7 +555,7 @@ void tick()
 
 DWORD WINAPI worker(void *)
 {
-	timeBeginPeriod(1);
+	loader::time_begin_period(1);
 	logf("t7ghost %s harvester started", kVariant);
 	if (t7::exe_stamp() != t7::kExeStamp)
 	{
@@ -578,7 +578,7 @@ BOOL APIENTRY DllMain(HMODULE mod, DWORD reason, LPVOID)
 	if (reason == DLL_PROCESS_ATTACH)
 	{
 		DisableThreadLibraryCalls(mod);
-		// one copy per process (the mod or a harvester, under dinput8.dll or version.dll); an old
+		// one copy per process (the mod or a harvester, under any of its five names); an old
 		// version.dll of ours next to this dinput8.dll would run too - stay off and say so
 		if (!loader::first_in_process())
 			return TRUE;

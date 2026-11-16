@@ -22,6 +22,7 @@ namespace gb
 {
 constexpr uintptr_t kTreasureNext = 0x439340, kApplyGhost = 0x439C90, kGhostList = 0x34CEA10;
 constexpr uintptr_t kBattleMgr = 0x34CE030, kOptions = 0x34CE450, kOptRounds = 0xA1E0, kPlayerInfos = 0x34D55A0;
+constexpr uintptr_t kOptTime = 0xA1E4, kCfgTime = 0x9C; // Game Options time limit (seconds) -> the fight's (VS, 0x3E693A)
 constexpr uintptr_t kFnCfgSetChar = 0x2C8B90, kFnCfgSetStage = 0x2C8BD0, kFnCfgSetRounds = 0x1810EE0;
 constexpr uintptr_t kFnInfoFind = 0x3CDA60, kFnInfoSetChar = 0x3CD6A0, kFnInfoSetStage = 0x3CD750, kFnInfoSetCostume = 0x3CD690;
 constexpr uintptr_t kFnCostumeSetMode = 0x292CD0; // on cfg +0xB8 + side*0x460: 0 = default costume, 4 = the ghost's own
@@ -870,6 +871,17 @@ void apply(int type)
 
 	if (opt >= 1 && opt <= 5)
 		fn<void(__fastcall *)(uintptr_t, int)>(kFnCfgSetRounds)(cfg, opt), rounds = opt;
+	// the Game Options time limit too (author 2026-11-16: 30 s in the options, Ghost Battle still ran 60 s - Treasure
+	// never applies it). Exactly as VS does (exe+0x3E693A): options +0xA1E4 (getter 0x2AFF40) -> cfg +0x9C, as is
+	{
+		uintptr_t o = 0;
+		int32_t tl = 0, old_tl = 0;
+		if (t7::rd(t7::exe_base() + kOptions, o) && o && t7::rd(o + kOptTime, tl) && t7::rd(cfg + kCfgTime, old_tl) && tl != old_tl)
+		{
+			*reinterpret_cast<int32_t *>(cfg + kCfgTime) = tl;
+			logf("gb: time limit %d -> %d (Game Options)", old_tl, tl);
+		}
+	}
 	if (g_now.stage >= 0)
 	{
 		fn<void(__fastcall *)(uintptr_t, int)>(kFnCfgSetStage)(cfg, g_now.stage);

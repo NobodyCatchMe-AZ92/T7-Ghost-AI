@@ -429,6 +429,7 @@ struct Settings
 	int adapt = 70;             // 0-100: how strongly the AI adapts to the human's habits learned in play
 	int throw_break = 0;        // 0 = the player's own break rate (profile), 1 = never, 2-100 = % chance
 	bool wall_awareness = true; // walls change how it plays (stage maps in walls.txt)
+	bool timer_awareness = true; // the last 9 seconds: behind on life = pressure, ahead = defend the lead (2026-11-16)
 	bool arcade = true;         // also replace the CPU in Arcade Battle
 	bool treasure = true;       // also replace the CPU in Treasure Battle
 	bool ghost_battle = true;   // Ghost Battle Mode: Treasure Battle with Game Options rounds (ghostbattle.hpp)
@@ -472,11 +473,13 @@ struct Settings
 	bool mod_camera_height_free = false; // the height slider instead of the height linked to the distance
 	int mod_hud_x = 0, mod_hud_y = 0;   //   lifebar HUD position offset (HUD pixels; every mode)
 	int mod_hud_scale = 100;            //   lifebar HUD size in percent of the HUD Settings size (50-150)
+	int mod_msg_x = 0, mod_msg_y = 0;   //   round messages (Round 1, Fight!, K.O. ...) position offset (HUD pixels; every mode)
+	int mod_msg_scale = 100;            //   round messages size in percent (50-150)
 };
 
 // Ghost AI presets (F1 "Ghost AI Preset", 2026-10-19). While one is chosen the Ghost AI sliders are
 // locked to it; the ini keeps the custom values for "Custom Settings".
-struct AiValues { int reaction, read, guard, decision, adapt, throw_break, punish, combo; bool walls; };
+struct AiValues { int reaction, read, guard, decision, adapt, throw_break, punish, combo; bool walls; bool timers = true; };
 inline constexpr const char *kAiPresetNames[] = { "Custom Settings", "Fair", "Medium Challenge", "Challenging", "Unfair" };
 inline constexpr AiValues kAiPresets[] = {
 	{},
@@ -497,7 +500,7 @@ inline void apply_ai_preset(Settings &c, int p)
 		return;
 	const AiValues &v = kAiPresets[p];
 	c.reaction_frames = v.reaction, c.input_read_chance = v.read, c.guard_skill = v.guard, c.decision_skill = v.decision;
-	c.adapt = v.adapt, c.throw_break = v.throw_break, c.punish_skill = v.punish, c.combo_style = v.combo, c.wall_awareness = v.walls;
+	c.adapt = v.adapt, c.throw_break = v.throw_break, c.punish_skill = v.punish, c.combo_style = v.combo, c.wall_awareness = v.walls, c.timer_awareness = v.timers;
 }
 
 class Brain
@@ -511,8 +514,10 @@ public:
 	Routes punishes;                           // the author's punishes (combos/punishes_<char>.txt)
 	Taunts taunts;                             // the author's taunts after a KO (combos/taunts_<char>.txt)
 	// wall awareness status (shown in the settings panel)
-	enum WallState { kWsOff, kWsNoWalls, kWsCalm, kWsBack, kWsCornered, kWsPress };
-	struct WallInfo { int state = kWsOff; float my_back = -1, opp_back = -1; int my_type = 0, opp_type = 0; const char *level = ""; } wall_info;
+	enum WallState { kWsOff, kWsNoWalls, kWsCalm, kWsBack, kWsCornered, kWsPress, kWsBackFar };
+	struct WallInfo { int state = kWsOff; float my_back = -1, opp_back = -1, dist = -1; int my_type = 0, opp_type = 0; const char *level = ""; } wall_info;
+	enum TimeState { kTsOff, kTsCalm, kTsChase, kTsHold, kTsWall };
+	struct TimeInfo { int state = kTsOff; int frames_left = -1; } time_info; // Timer Awareness (time_update)
 	// frames we had after blocking each opponent move, measured live (and saved via on_learn)
 	std::unordered_map<uint32_t, std::vector<int>> learned;
 	void (*on_learn)(uint32_t key, int frames) = nullptr;
@@ -676,6 +681,7 @@ public:
 			}
 		}
 		wall_update(me, opp);
+		time_update(me, opp);
 		sidestep_learn(me, opp);
 		if (me.rage_fx) rage_seen_[0] = frame_;
 		if (opp.rage_fx) rage_seen_[1] = frame_;
@@ -1712,11 +1718,12 @@ private:
 
 	// ---- wall awareness
 	walls::Tracker wt_;
-	bool round_full_ = true, wall_press_ = false;
+	bool round_full_ = true, wall_press_ = false, wall_backfar_ = false;
 	int64_t last_wall_move_ = -1000;
 	static constexpr float kBackDist = 2500;   // own back this close to a wall: back to the wall
 	static constexpr float kPressDist = 3000;  // opponent's back this close: press them into it
 	static constexpr float kCornerDist = 2500; // two different walls this close: cornered
+	static constexpr float kBackFarEnter = 3250, kBackFarLeave = 3000; // back to the wall, opponent this far: approach safely
 	// sidestep direction learning: does an 'up' tap move us to the left or right of our facing?
 	int u_sign_[2] = { 0, 0 };                 // per screen side: +1 / -1, 0 = not learned yet
 	int ws_pending_ = -1, ws_logged_ = -1;
@@ -1781,8 +1788,12 @@ private:
 				cornered = true;
 		}
 		const bool back = w.my_back < kBackDist, press = w.opp_back < kPressDist;
+		w.dist = me.distance;
+		// back to the wall but the opponent far away (author 2026-11-16: a Ghost behind on life never approached a
+		// player turtling away): approaching safely - from 3.25 m, back to the wall state again under 3.0 m
+		const bool opp_far = me.distance >= (wall_info.state == kWsBackFar ? kBackFarLeave : kBackFarEnter);
 		if (back && (!press || w.my_back <= w.opp_back))
-			w.state = cornered ? kWsCornered : kWsBack;
+			w.state = opp_far ? kWsBackFar : cornered ? kWsCornered : kWsBack;
 		else if (press)
 			w.state = kWsPress;
 		else
@@ -1794,7 +1805,8 @@ private:
 		else if (w.state != ws_logged_ && frame_ - ws_since_ >= 10)
 		{
 			ws_logged_ = w.state;
-			static const char *n[] = { "off", "no walls", "calm", "back to the wall", "cornered", "pressing - you at the wall" };
+			static const char *n[] = { "off", "no walls", "calm", "back to the wall", "cornered", "pressing - you at the wall",
+				"back to the wall, you're far - approaching safely" };
 			snprintf(ws_note_, sizeof ws_note_, "wall: %s (behind me %.1f m, behind you %.1f m, %s)", n[w.state],
 				w.my_back / 1000.0f, w.opp_back / 1000.0f, w.level);
 			last_event = ws_note_, dbg.decided = true;
@@ -1841,6 +1853,153 @@ private:
 		return true;
 	}
 
+	// ---- Timer Awareness (author 2026-11-16). The round timer = battle block exe+0x34CD4E0 +0x8, frames left (3600 at
+	// "Fight!" for 60 s, counting down; recon 2026-11-14 snapshots 3600 -> 3559 0.7 s in), +0x14 phase 4 = fighting. In the
+	// last 9 seconds (<= 540 frames): behind on life (health %) = chase - attack more, favouring quick strikes (<= 12 f),
+	// lows, throws and moves that are plus on block, throws up close; ahead = hold - backdash, guard (guard roll +20),
+	// attack far less. Wall Awareness comes first (author): with our back to a wall, cornered or pressing the player at
+	// one, the wall's behaviour plays and the timer's waits (state "wall").
+	static constexpr uintptr_t kRoundTimer = 0x34CD4E0 + 0x8, kRoundPhase = 0x34CD4E0 + 0x14;
+	static constexpr int kTimeFrames = 9 * 60;
+	int ts_logged_ = -1, time_char_ = -1;
+	int64_t last_time_move_ = -1000;
+	char ts_note_[120] = "";
+	void time_update(const Snap &me, const Snap &opp)
+	{
+		TimeInfo t;
+		if (!cfg.timer_awareness)
+		{
+			time_info = t;
+			return;
+		}
+		const int left = t7::read_global(kRoundTimer), phase = t7::read_global(kRoundPhase);
+		t.frames_left = left;
+		if (phase != 4 || left <= 0 || left > kTimeFrames)
+			t.state = kTsCalm;
+		else if (wall_info.state == kWsBack || wall_info.state == kWsCornered || wall_info.state == kWsPress ||
+			(wall_info.state == kWsBackFar && me.hp >= opp.hp)) // approaching safely: only a deficit takes over
+			t.state = kTsWall;
+		else
+			t.state = me.hp < opp.hp ? kTsChase : me.hp > opp.hp ? kTsHold : kTsCalm;
+		time_info = t;
+		if (t.state != ts_logged_ && (t.state == kTsChase || t.state == kTsHold || ts_logged_ == kTsChase || ts_logged_ == kTsHold))
+		{
+			static const char *n[] = { "off", "calm", "behind on life - pressing", "ahead on life - holding the lead", "the wall comes first" };
+			snprintf(ts_note_, sizeof ts_note_, "timer: %s (%.1f s left, health %d vs %d)", n[t.state], left / 60.0f, me.hp, opp.hp);
+			last_event = ts_note_, dbg.decided = true;
+		}
+		ts_logged_ = t.state;
+	}
+
+	// chase: quick strikes, lows, throws and plus-on-block moves weigh more; moves that cannot reach this distance weigh
+	// far less (author 2026-11-16: Julia pressed buttons from too far to connect)
+	float time_dist_ = 0;
+	float chase_bonus(const Chunk &c) const
+	{
+		if (time_info.state != kTsChase || c.kind != kAttack || time_char_ < 0)
+			return 1.0f;
+		float k = c.startup > 0 && c.startup <= 12 ? 1.6f : 0.8f;
+		const auto it = framedata.find(move_key(time_char_, c.first_move));
+		if (it != framedata.end())
+		{
+			if (it->second.level == 1) k *= 1.4f;                                         // low
+			if (it->second.level == 10) k *= 1.4f;                                        // throw
+			if (it->second.block_adv != 9999 && it->second.block_adv >= 1) k *= 1.5f;      // plus on block
+			if (it->second.range > 0 && time_dist_ > it->second.range + 150) k *= 0.15f;   // cannot reach from here
+		}
+		return k;
+	}
+
+	// a quick move (<= 12 f, not a throw) of the player that reaches this distance (hold: "keep out" pokes)
+	const Chunk *quick_in_range(const Profile &p, const Snap &me)
+	{
+		const bool rage = in_rage(0, me);
+		return sample(p, [&](const Chunk &c) {
+			if (c.kind != kAttack || c.sit != kSitNeutral || (c.rage && !rage))
+				return false;
+			const auto it = framedata.find(move_key(p.char_id, c.first_move));
+			if (it == framedata.end())
+				return false;
+			const int su = it->second.startup > 0 ? it->second.startup : c.startup;
+			return su > 0 && su <= 12 && it->second.level != 10 && it->second.range > 0 && me.distance <= it->second.range + 100;
+		});
+	}
+
+	// step 4 from the timer (after the wall's); true = it already chose. Revised 2026-11-16 (author's test: behind on
+	// life Julia stayed far away pressing buttons that could not connect; ahead she held midscreen, dashed forward and
+	// sidestepped instead of backdashing). Chase: away from close range always dash in (run from far), up close stay and
+	// press (the player's neutral moves - their backdashes / sidesteps - nearly never). Hold ("turtle"): in mid range
+	// backdash most of the time, a quick poke when the player gets close, walk back / guard from mid-far.
+	static constexpr float kCloseDist = 1500, kRunDist = 3200, kTurtleDist = 4500, kPokeDist = 1700;
+	bool time_choice(const Profile &p, const Snap &me, const Snap &opp, int sit)
+	{
+		time_char_ = p.char_id, time_dist_ = me.distance;
+		const int st = time_info.state;
+		if (st != kTsChase && st != kTsHold)
+			return false;
+		const bool free = sit == kSitNeutral && cls(me) == Cls::free;
+		if (st == kTsChase)
+		{
+			if (me.distance > kCloseDist)
+			{
+				attack_mult_ *= 0.5f, neutral_mult_ *= 0.5f;
+				if (!free)
+					return false;
+				const bool run = me.distance > kRunDist;
+				std::vector<uint32_t> in(run ? 22 : 10, 0);
+				in[1] = F, in[3] = F; // f, f = dash; held on = run
+				if (run)
+					for (size_t i = 4; i < in.size(); ++i)
+						in[i] = F;
+				last_time_move_ = frame_;
+				play(in, true, run ? "timer: run in to take the lead" : "timer: dash in to take the lead", kNeutral);
+				return true;
+			}
+			attack_mult_ *= 2.0f, neutral_mult_ *= 0.25f; // close: stay here and press
+			if (!free || frame_ - last_time_move_ < 20)
+				return false;
+			if (me.distance < 1200 && int(rng_() % 100) < 20) // within throw range: a throw now and then
+			{
+				const bool rage = in_rage(0, me);
+				if (auto c = sample(p, [&](const Chunk &c) { return c.kind == kAttack && c.sit == kSitNeutral && (!c.rage || rage) && is_throw(p, c); }))
+				{
+					last_time_move_ = frame_;
+					play_chunk(*c, false, "timer: throw to take the lead");
+					return true;
+				}
+			}
+			return false;
+		}
+		// hold
+		attack_mult_ *= 0.45f, neutral_mult_ *= 1.8f;
+		if (!free)
+			return false;
+		const int r = int(rng_() % 100);
+		if (me.distance < kPokeDist && r < 45) // they are close: a quick poke to keep them out
+			if (const Chunk *c = quick_in_range(p, me))
+			{
+				last_time_move_ = frame_;
+				play_chunk(*c, false, "timer: poke to keep you out");
+				return true;
+			}
+		if (me.distance < kTurtleDist && r < 85) // backdash (b, b), then keep holding back = guarding
+		{
+			std::vector<uint32_t> in(16, B);
+			in[0] = 0, in[2] = 0;
+			last_time_move_ = frame_;
+			play(in, true, "timer: backdash to hold the lead", kNeutral);
+			return true;
+		}
+		if (r < 95) // far enough: walk back / guard
+		{
+			last_time_move_ = frame_;
+			play(std::vector<uint32_t>(20, B), true, "timer: walk back / guard to hold the lead", kNeutral);
+			return true;
+		}
+		(void)opp;
+		return false;
+	}
+
 	bool is_throw(const Profile &p, const Chunk &c) const
 	{
 		const auto it = framedata.find(move_key(p.char_id, c.first_move));
@@ -1850,7 +2009,7 @@ private:
 	// step 4 bias from walls; true = it already chose
 	bool wall_choice(const Profile &p, const Snap &me, const Snap &opp, int sit, int dist)
 	{
-		wall_press_ = false;
+		wall_press_ = false, wall_backfar_ = false;
 		const int st = wall_info.state;
 		if (st == kWsBack || st == kWsCornered)
 		{
@@ -1874,6 +2033,30 @@ private:
 				return true;
 			}
 		}
+		else if (st == kWsBackFar)
+		{
+			// approaching safely: mostly the player's own game, a few dashes forward and sidesteps off the wall, their
+			// backdashes rarely (weight). Behind on life in the last seconds the timer takes over completely (time_choice)
+			if (time_info.state == kTsChase)
+				return false;
+			wall_backfar_ = true;
+			if (sit != kSitNeutral || cls(me) != Cls::free || frame_ - last_wall_move_ < 45)
+				return false;
+			const int r = int(rng_() % 100);
+			if (r < 20)
+			{
+				std::vector<uint32_t> in(10, 0);
+				in[1] = F, in[3] = F; // f, f = dash
+				last_wall_move_ = frame_;
+				play(in, true, "wall: dash forward, away from the wall", kNeutral);
+				return true;
+			}
+			if (r < 32 && sidestep_away(me, opp, wt_.current(wt_.level_for(me.py))))
+			{
+				last_wall_move_ = frame_;
+				return true;
+			}
+		}
 		else if (st == kWsPress)
 		{
 			attack_mult_ *= 1.5f, neutral_mult_ *= 0.7f;
@@ -1882,15 +2065,31 @@ private:
 		return false;
 	}
 
+	// a neutral chunk that starts with a backdash: back tapped, released, tapped again within its first 14 frames
+	static bool is_backdash(const Chunk &c)
+	{
+		int taps = 0;
+		bool held = false;
+		for (size_t i = 0; i < c.inputs.size() && i < 14; ++i)
+		{
+			const uint32_t d = c.inputs[i] & DIRS;
+			const bool b = (d & B) && !(d & F) && !(d & (U | D));
+			if (b && !held)
+				++taps;
+			held = b;
+		}
+		return taps >= 2;
+	}
+
 	// weight of a chunk when sampling: the player's own choices, tilted toward what worked
 	float weight(const Chunk &c) const
 	{
 		if (c.kind == kNeutral)
-			return neutral_mult_;
+			return neutral_mult_ * (wall_backfar_ && is_backdash(c) ? 0.15f : 1.0f);
 		if (c.kind != kAttack)
 			return 1.0f;
 		const float power = wall_press_ ? 1.0f + std::min(2.0f, c.damage / 25.0f) + (c.outcome == kJuggle ? 0.5f : 0.0f) : 1.0f;
-		return attack_mult_ * power * (favour_fast_ ? (c.startup > 0 && c.startup <= 12 ? 1.3f : 0.7f) : 1.0f) * base_weight(c);
+		return attack_mult_ * power * (favour_fast_ ? (c.startup > 0 && c.startup <= 12 ? 1.3f : 0.7f) : 1.0f) * chase_bonus(c) * base_weight(c);
 	}
 	float base_weight(const Chunk &c) const
 	{
@@ -2032,7 +2231,7 @@ private:
 		const bool pressure = frame_ - last_seen_attack_ <= kPressureFrames;
 		if (seen.move_id != guard_roll_move_)
 			guard_roll_move_ = seen.move_id, guard_roll_ok_ = int(rng_() % 100) <
-				cfg.guard_skill * std::max(p.guard_rate, 0.6f) + (wall_info.state == kWsCornered ? 15 : 0);
+				cfg.guard_skill * std::max(p.guard_rate, 0.6f) + (wall_info.state == kWsCornered ? 15 : 0) + (time_info.state == kTsHold ? 20 : 0);
 		if ((sit == kOppStartup || pressure) && sit != kOppJuggled && sit != kOppDown && guard_roll_ok_)
 		{
 			const bool low = cls(seen) == Cls::attack && seen.attack_type == 1;
@@ -2045,6 +2244,8 @@ private:
 		if (adapt_choice(p, me, sit))
 			return;
 		if (wall_choice(p, me, opp, sit, dist))
+			return;
+		if (time_choice(p, me, opp, sit))
 			return;
 		// frame advantage first (minus: guard/evade like the player did; plus: their pressure), then
 		// distance, then life lead and rage; back off one condition at a time

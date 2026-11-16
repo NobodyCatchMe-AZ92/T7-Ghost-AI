@@ -314,14 +314,15 @@ void overlay_panel()
 		{
 			const auto &w = b->wall_info;
 			static const char *names[] = { "off", "no walls on this stage", "not concerned about walls",
-				"back to the wall - getting out", "cornered - defensive, looking for a throw", "you're at the wall - pressing" };
+				"back to the wall - getting out", "cornered - defensive, looking for a throw", "you're at the wall - pressing",
+				"back to the wall, you're far - approaching safely" };
 			static const ImVec4 cols[] = { ImVec4(0.6f, 0.6f, 0.6f, 1), ImVec4(0.6f, 0.6f, 0.6f, 1), ImVec4(0.75f, 0.85f, 0.75f, 1),
-				ImVec4(0.95f, 0.75f, 0.3f, 1), ImVec4(0.95f, 0.45f, 0.3f, 1), ImVec4(0.45f, 0.75f, 1.0f, 1) };
-			const int st = std::clamp(w.state, 0, 5);
+				ImVec4(0.95f, 0.75f, 0.3f, 1), ImVec4(0.95f, 0.45f, 0.3f, 1), ImVec4(0.45f, 0.75f, 1.0f, 1), ImVec4(0.85f, 0.85f, 0.45f, 1) };
+			const int st = std::clamp(w.state, 0, 6);
 			ImGui::SameLine(200 * sc);
 			ImGui::TextColored(cols[st], "%s", names[st]);
 			static const char *types[] = { "wall", "balcony", "breakable wall" };
-			help("Tick to let the location of nearby walls influence the Ghost's behaviors. Ghosts will sidestep away from walls, defend near corners, pressure you against walls.");
+			help("Tick to let the location of nearby walls influence the Ghost's behaviors. Ghosts will sidestep away from walls, defend near corners, pressure you against walls. With its back to the wall but you 3.25 m or more away, a Ghost approaches safely: it plays mostly as normal, dashes forward and sidesteps off the wall now and then, and rarely backdashes.");
 			if (w.state >= ghost::Brain::kWsCalm)
 			{
 				char mine[48] = "-", yours[48] = "-";
@@ -329,8 +330,23 @@ void overlay_panel()
 					snprintf(mine, sizeof mine, "%.1f m (%s)", w.my_back / 1000.0f, types[std::clamp(w.my_type, 0, 2)]);
 				if (w.opp_back >= 0 && w.opp_back < 1e8f)
 					snprintf(yours, sizeof yours, "%.1f m (%s)", w.opp_back / 1000.0f, types[std::clamp(w.opp_type, 0, 2)]);
-				ImGui::TextDisabled("behind it: %s   behind you: %s   %s", mine, yours, w.level);
+				ImGui::TextDisabled("behind it: %s   behind you: %s   between you: %.2f m   %s", mine, yours, w.dist / 1000.0f, w.level);
 			}
+		}
+		// timer awareness (author 2026-11-16): switch + what the AI currently thinks about the clock
+		bool ta = c.timer_awareness;
+		if (ImGui::Checkbox("Timer awareness", &ta))
+			c.timer_awareness = ta, save_int(L"timer_awareness", ta);
+		{
+			const auto &t = b->time_info;
+			static const char *names[] = { "off", "not concerned about the timer", "behind on life - pressing", "ahead on life - holding the lead",
+				"last seconds - the wall comes first" };
+			static const ImVec4 cols[] = { ImVec4(0.6f, 0.6f, 0.6f, 1), ImVec4(0.75f, 0.85f, 0.75f, 1), ImVec4(0.45f, 0.75f, 1.0f, 1),
+				ImVec4(0.95f, 0.75f, 0.3f, 1), ImVec4(0.6f, 0.6f, 0.6f, 1) };
+			const int st = std::clamp(t.state, 0, 4);
+			ImGui::SameLine(200 * sc);
+			ImGui::TextColored(cols[st], "%s", names[st]);
+			help("Tick to let the round timer influence the Ghost's behaviors. In the last 9 seconds of a round, a Ghost behind on life pressures you to take the lead back (quick strikes, lows, throws, moves that are plus on block); a Ghost ahead on life holds its lead (backdashes, guards, attacks far less). Wall awareness comes first: with its back to the wall, cornered, or pressing you at a wall, the Ghost plays the wall.");
 		}
 		ImGui::EndDisabled();
 		ImGui::Spacing();
@@ -389,7 +405,7 @@ void overlay_panel()
 			ImGui::EndDisabled();
 		}
 		row("End-of-match menu", em, c.gb_end_menu, L"end_menu", "Tick to enable Ghost Battle's custom end of match menu options (choose the next opponent, rematch with same stage, rematch on new stage, etc)");
-		row("   Native look", nm, c.gb_native_menu, L"native_menu", "Show the end-of-match menu inside the game's own result window. Untick to use the overlay menu instead.");
+		row("   Native look menu", nm, c.gb_native_menu, L"native_menu", "Show the end-of-match menu inside the game's own result window. Untick to use the overlay menu instead.");
 		row("Call it GHOST BATTLE", rn, c.gb_rename, L"rename", "The main menu calls the mode GHOST BATTLE instead of TREASURE BATTLE.");
 		row("Hide treasure chests", hc, c.gb_hide_chests, L"hide_chests", "No treasure chest icons on the match HUD (the results screen still shows your rewards).");
 		row("Random player per ghost", rp, c.gb_random_player, L"random_player", "Tick to make it so every opponent you encounter is only based on ONE ghost profile. Ticking this option makes the opponents you encounter less intelligent overall, but more unique in playstyle (e.g. you may encounter two Paul opponents who play very differently). Recommended is unticked/disabled.");
@@ -408,89 +424,7 @@ void overlay_panel()
 		ImGui::Spacing();
 	}
 
-	// profiles per character
-	// Game Modifiers: change the fighting itself (offline only; Health from the next round, the rest at once)
-	if (ImGui::CollapsingHeader("Game Modifiers"))
-	{
-		auto save_mod = [](const wchar_t *key, bool v) { ini_set(L"modifiers", key, std::to_wstring(int(v))); };
-		bool nr = c.mod_no_rage;
-		if (ImGui::Checkbox("No Rage", &nr))
-			c.mod_no_rage = nr, save_mod(L"no_rage", nr);
-		help("Nobody gets rage: no rage damage boost, no Rage Arts or Rage Drives.");
-		bool npc = c.mod_no_pc;
-		if (ImGui::Checkbox("No Power Crush", &npc))
-			c.mod_no_pc = npc, save_mod(L"no_power_crush", npc);
-		help("Power crush moves lose their armor: they get interrupted by hits like any other move.");
-		bool nsc = c.mod_no_screw;
-		if (ImGui::Checkbox("No Screw", &nsc))
-			c.mod_no_screw = nsc, save_mod(L"no_screw", nsc);
-		help("Screw moves (the ones that spin a juggled opponent so the combo can continue) give a normal juggle hit instead.");
-		bool nwb = c.mod_no_wall_bound;
-		if (ImGui::Checkbox("No Wall Bound", &nwb))
-			c.mod_no_wall_bound = nwb, save_mod(L"no_wall_bound", nwb);
-		help("Wall bound moves (the ones that bounce the opponent off the wall so a combo can start) give a normal wall splat instead.");
-		int hp = std::clamp(c.mod_health, 25, 500);
-		ImGui::SetNextItemWidth(300 * sc);
-		if (ImGui::SliderInt("Health", &hp, 25, 500, "%d%%"))
-			c.mod_health = (hp + 2) / 5 * 5;
-		if (ImGui::IsItemDeactivatedAfterEdit())
-			ini_set(L"modifiers", L"health", std::to_wstring(c.mod_health));
-		help("Both players' health bars, in percent of normal: 200% takes twice the damage to KO, 50% half. Ctrl+click to type a value.");
-		int bd = std::clamp(c.mod_backdash, 1, 200);
-		ImGui::SetNextItemWidth(300 * sc);
-		if (ImGui::SliderInt("Backdash Distance", &bd, 1, 200, "%d%%"))
-			c.mod_backdash = bd;
-		if (ImGui::IsItemDeactivatedAfterEdit())
-			ini_set(L"modifiers", L"backdash", std::to_wstring(c.mod_backdash));
-		help("How far both players' default backdash (b,b) travels, in percent of normal. Takes effect immediately. Ctrl+click to type a value.");
-		int ss = std::clamp(c.mod_sidestep, 1, 200);
-		ImGui::SetNextItemWidth(300 * sc);
-		if (ImGui::SliderInt("Sidestep Distance", &ss, 1, 200, "%d%%"))
-			c.mod_sidestep = ss;
-		if (ImGui::IsItemDeactivatedAfterEdit())
-			ini_set(L"modifiers", L"sidestep", std::to_wstring(c.mod_sidestep));
-		help("How far both players' sidesteps (tap up or down) and sidewalks (hold up or down) travel, in percent of normal. Takes effect immediately. Ctrl+click to type a value.");
-		int cam = std::clamp(c.mod_camera, 1, 200);
-		ImGui::SetNextItemWidth(300 * sc);
-		if (ImGui::SliderInt("Camera Distance (online friendly)", &cam, 1, 200, "%d%%"))
-			c.mod_camera = cam;
-		if (ImGui::IsItemDeactivatedAfterEdit())
-			ini_set(L"modifiers", L"camera", std::to_wstring(c.mod_camera));
-		help("How far the normal battle camera is from the fighters, in percent of normal (lower = closer). Cinematic cameras (Rage Arts, slow motion, wall bounds...) are not changed. Works in every game mode, online too (only your screen changes). Takes effect immediately. Ctrl+click to type a value.");
-		bool camf = c.mod_camera_height_free;
-		if (ImGui::Checkbox("Adjust camera height independently", &camf))
-			c.mod_camera_height_free = camf, ini_set(L"modifiers", L"camera_height_free", std::to_wstring(int(camf)));
-		if (c.mod_camera_height_free)
-		{
-			int camh = std::clamp(c.mod_camera_height, -100, 100);
-			ImGui::SetNextItemWidth(300 * sc);
-			if (ImGui::SliderInt("Camera Height Offset", &camh, -100, 100, "%+d cm"))
-				c.mod_camera_height = camh;
-			if (ImGui::IsItemDeactivatedAfterEdit())
-				ini_set(L"modifiers", L"camera_height", std::to_wstring(c.mod_camera_height));
-			help("Moves the normal battle camera straight up (or down) from where Camera Distance puts it, without tilting it. Cinematic cameras are not changed. Works in every game mode, online too. Takes effect immediately. Ctrl+click to type a value.");
-		}
-		auto hud_slider = [&](const char *label, int &v, int lo, int hi, const char *fmt, const wchar_t *key, const char *tip) {
-			int x = std::clamp(v, lo, hi);
-			ImGui::SetNextItemWidth(300 * sc);
-			if (ImGui::SliderInt(label, &x, lo, hi, fmt))
-				v = x;
-			if (ImGui::IsItemDeactivatedAfterEdit())
-				ini_set(L"modifiers", key, std::to_wstring(v));
-			help(tip);
-		};
-		hud_slider("Lifebar HUD X (online friendly)", c.mod_hud_x, -500, 500, "%+d", L"hud_x",
-			"Moves the lifebar HUD (health bars, names, portraits, rage, timer, round markers, ranks, title plates) left / right. Other HUD elements stay. Every game mode, online too. Ctrl+click to type a value.");
-		hud_slider("Lifebar HUD Y (online friendly)", c.mod_hud_y, -500, 500, "%+d", L"hud_y",
-			"Moves the lifebar HUD up / down (+ = down). Other HUD elements stay. Every game mode, online too. Ctrl+click to type a value.");
-		hud_slider("Lifebar HUD Size (online friendly)", c.mod_hud_scale, 50, 150, "%d%%", L"hud_scale",
-			"The lifebar HUD's size, in percent of the size Options > HUD Settings gives it (Standard / Max), around the screen centre. Other HUD elements stay. Every game mode, online too. Ctrl+click to type a value.");
-		ImGui::TextDisabled("camera and lifebar HUD options: every game mode, online too; everything else: offline battles only");
-		ImGui::TextDisabled("changes take effect at once (Health: from the next round)");
-		ImGui::Spacing();
-	}
-
-	if (!g_ov.choices.empty() && ImGui::CollapsingHeader("Imitation Settings"))
+	if (!g_ov.choices.empty() && ImGui::CollapsingHeader("Ghost Imitation Settings"))
 	{
 		for (auto &[cid, opts] : g_ov.choices)
 		{
@@ -513,6 +447,129 @@ void overlay_panel()
 		}
 		ImGui::TextDisabled("who each character's Ghost imitates - merged = all recorded players as one;");
 		ImGui::TextDisabled("hybrid = main player's style, others fill gaps; or one recorded player only");
+		ImGui::Spacing();
+	}
+
+	// profiles per character
+	// Game Modifiers: change the fighting itself (offline only; Health from the next round, the rest at once)
+	if (ImGui::CollapsingHeader("Game Modifiers"))
+	{
+		auto save_mod = [](const wchar_t *key, bool v) { ini_set(L"modifiers", key, std::to_wstring(int(v))); };
+		bool nr = c.mod_no_rage;
+		if (ImGui::Checkbox("No Rage", &nr))
+			c.mod_no_rage = nr, save_mod(L"no_rage", nr);
+		help("Disable Rage damage, Rage Arts, and Rage Drives.");
+		bool npc = c.mod_no_pc;
+		if (ImGui::Checkbox("No Power Crush", &npc))
+			c.mod_no_pc = npc, save_mod(L"no_power_crush", npc);
+		help("Power Crush moves lose their armor and can be interrupted.");
+		bool nsc = c.mod_no_screw;
+		if (ImGui::Checkbox("No Screw", &nsc))
+			c.mod_no_screw = nsc, save_mod(L"no_screw", nsc);
+		help("Screw moves don't extend combos.");
+		bool nwb = c.mod_no_wall_bound;
+		if (ImGui::Checkbox("No Wall Bound", &nwb))
+			c.mod_no_wall_bound = nwb, save_mod(L"no_wall_bound", nwb);
+		help("Wall bound moves give a normal wall splat instead.");
+		bool wu = warmup::g_on;
+		if (ImGui::Checkbox("Warmup Animations", &wu))
+			warmup::set_on(wu);
+		help("Characters play a warmup animation at the start of certain rounds, similar to Tekken 3 and Tekken 8. Offline battles only.");
+		bool wc = warmup::g_cam_on;
+		if (ImGui::Checkbox("Warmup Cinematic Angles (online friendly)", &wc))
+			warmup::set_cam_on(wc);
+		help("New round start cameras to complement the Warmup Animations. They are similar to the round start angles in Tekken 8.");
+		int hp = std::clamp(c.mod_health, 25, 500);
+		ImGui::SetNextItemWidth(300 * sc);
+		if (ImGui::SliderInt("Health", &hp, 25, 500, "%d%%"))
+			c.mod_health = (hp + 2) / 5 * 5;
+		if (ImGui::IsItemDeactivatedAfterEdit())
+			ini_set(L"modifiers", L"health", std::to_wstring(c.mod_health));
+		help("Both players' health bars, in percent of normal: 200% takes twice the damage to KO, 50% half. Ctrl+click to type a value.");
+		int bd = std::clamp(c.mod_backdash, 1, 200);
+		ImGui::SetNextItemWidth(300 * sc);
+		if (ImGui::SliderInt("Backdash Distance", &bd, 1, 200, "%d%%"))
+			c.mod_backdash = bd;
+		if (ImGui::IsItemDeactivatedAfterEdit())
+			ini_set(L"modifiers", L"backdash", std::to_wstring(c.mod_backdash));
+		help("How far both players' default backdash (b,b) travels, in percent of normal. Takes effect immediately. Ctrl+click to type a value.");
+		int ss = std::clamp(c.mod_sidestep, 1, 200);
+		ImGui::SetNextItemWidth(300 * sc);
+		if (ImGui::SliderInt("Sidestep Distance", &ss, 1, 200, "%d%%"))
+			c.mod_sidestep = ss;
+		if (ImGui::IsItemDeactivatedAfterEdit())
+			ini_set(L"modifiers", L"sidestep", std::to_wstring(c.mod_sidestep));
+		help("How far both players' sidesteps (tap up or down) and sidewalks (hold up or down) travel, in percent of normal. Takes effect immediately. Ctrl+click to type a value.");
+		ImGui::TextDisabled("offline battles only; changes take effect at once (Health: from the next round)");
+		ImGui::Spacing();
+	}
+
+	// HUD & Screen Modifiers (author 2026-11-16): the camera and HUD options, out of Game Modifiers
+	if (ImGui::CollapsingHeader("HUD & Screen Modifiers"))
+	{
+		int cam = std::clamp(c.mod_camera, 1, 200);
+		ImGui::SetNextItemWidth(300 * sc);
+		if (ImGui::SliderInt("Camera Distance (online friendly)", &cam, 1, 200, "%d%%"))
+			c.mod_camera = cam;
+		if (ImGui::IsItemDeactivatedAfterEdit())
+			ini_set(L"modifiers", L"camera", std::to_wstring(c.mod_camera));
+		help("How far away the camera is from the characters. Ctrl+click to type a value.");
+		bool camf = c.mod_camera_height_free;
+		if (ImGui::Checkbox("Adjust camera height independently", &camf))
+			c.mod_camera_height_free = camf, ini_set(L"modifiers", L"camera_height_free", std::to_wstring(int(camf)));
+		if (c.mod_camera_height_free)
+		{
+			int camh = std::clamp(c.mod_camera_height, -100, 100);
+			ImGui::SetNextItemWidth(300 * sc);
+			if (ImGui::SliderInt("Camera Height Offset", &camh, -100, 100, "%+d cm"))
+				c.mod_camera_height = camh;
+			if (ImGui::IsItemDeactivatedAfterEdit())
+				ini_set(L"modifiers", L"camera_height", std::to_wstring(c.mod_camera_height));
+			help("Move the battle camera straight up or straight down.");
+		}
+		auto hud_slider = [&](const char *label, int &v, int lo, int hi, const char *fmt, const wchar_t *key, const char *tip) {
+			int x = std::clamp(v, lo, hi);
+			ImGui::SetNextItemWidth(300 * sc);
+			if (ImGui::SliderInt(label, &x, lo, hi, fmt))
+				v = x;
+			if (ImGui::IsItemDeactivatedAfterEdit())
+				ini_set(L"modifiers", key, std::to_wstring(v));
+			help(tip);
+		};
+		hud_slider("Lifebar HUD X (online friendly)", c.mod_hud_x, -500, 500, "%+d", L"hud_x",
+			"Move the lifebar HUD left / right. Ctrl+click to type a value.");
+		hud_slider("Lifebar HUD Y (online friendly)", c.mod_hud_y, -500, 500, "%+d", L"hud_y",
+			"Move the lifebar HUD up / down. Ctrl+click to type a value.");
+		hud_slider("Lifebar HUD Size (online friendly)", c.mod_hud_scale, 50, 150, "%d%%", L"hud_scale",
+			"Scale the size of the lifebar HUD. Ctrl+click to type a value.");
+		// round messages (author 2026-11-16): the same as the lifebar sliders, for the SW_UI_GameMessage movie
+		hud_slider("Round Messages X (online friendly)", c.mod_msg_x, -500, 500, "%+d", L"message_x",
+			"Moves the round messages (e.g. Round 1, Ready? Fight!) left / right. Ctrl+click to type a value.");
+		hud_slider("Round Messages Y (online friendly)", c.mod_msg_y, -500, 500, "%+d", L"message_y",
+			"Moves the round messages (e.g. Round 1, Ready? Fight!) up / down. Ctrl+click to type a value.");
+		hud_slider("Round Messages Size (online friendly)", c.mod_msg_scale, 50, 150, "%d%%", L"message_scale",
+			"Scale the size of the round messages. Ctrl+click to type a value.");
+		bool hm = warmup::g_hide_markers;
+		if (ImGui::Checkbox("Hide P1/P2 Marker HUD (online friendly)", &hm))
+			warmup::set_hide_markers(hm);
+		help("Hides the \"P1/P2/You/CPU\" labels that appear next to characters at the start of a round.");
+		ImGui::TextDisabled("every game mode, online too (only your screen changes)");
+		ImGui::TextDisabled("changes take effect at once");
+		ImGui::Spacing();
+	}
+
+	// Testing Hotkeys (author 2026-11-16): the warmup test keys and the pose tools, both off by default
+	if (ImGui::CollapsingHeader("Testing Hotkeys"))
+	{
+		bool tk = warmup::g_test_keys;
+		if (ImGui::Checkbox("Warmup animation test keys (F5-F8)", &tk))
+			warmup::set_test_keys(tk);
+		help("F5 = Round 1, F6 = Down (0-2), F7 = Up (2-0), F8 = Final Round warmup for P1; Shift + the key for P2. The fighter plays it whenever it stands in its stance, Practice included. Offline battles only.");
+		bool pt = warmup::g_pose_tools;
+		if (ImGui::Checkbox("Pose tools (F9-F12)", &pt))
+			warmup::set_pose_tools(pt);
+		help("Records every intro and win pose as it plays (t7ghost\\pose_moves.txt). In Practice: F10 / F9 next / previous recorded pose, F11 plays it again, F12 exports the lines of t7ghost\\pose_export.txt as warmup animations (Shift = P2's character). See tools/warmup/POSE_EXPORT.md. Offline battles only.");
+		ImGui::TextDisabled("both off by default");
 		ImGui::Spacing();
 	}
 
@@ -545,11 +602,11 @@ void overlay_panel()
 		c.ai_preset = d.ai_preset, save_int(L"ai_preset", d.ai_preset);
 		c.enabled = d.enabled, c.reaction_frames = d.reaction_frames, c.input_read_chance = d.input_read_chance;
 		c.punish_skill = d.punish_skill, c.combo_style = d.combo_style, c.guard_skill = d.guard_skill, c.decision_skill = d.decision_skill;
-		c.adapt = d.adapt, c.throw_break = d.throw_break, c.wall_awareness = d.wall_awareness;
+		c.adapt = d.adapt, c.throw_break = d.throw_break, c.wall_awareness = d.wall_awareness, c.timer_awareness = d.timer_awareness;
 		save_int(L"mod_enabled", d.enabled), save_int(L"reaction_frames", d.reaction_frames);
 		save_int(L"input_read_chance", d.input_read_chance), save_int(L"punish_proficiency", d.punish_skill), save_int(L"combo_style", d.combo_style);
 		save_int(L"guard_skill", d.guard_skill), save_int(L"decision_skill", d.decision_skill), save_int(L"adapt", d.adapt);
-		save_int(L"throw_break_chance", d.throw_break), save_int(L"wall_awareness", d.wall_awareness);
+		save_int(L"throw_break_chance", d.throw_break), save_int(L"wall_awareness", d.wall_awareness), save_int(L"timer_awareness", d.timer_awareness);
 		// Ghost Battle Mode options too
 		const auto gb = [](const wchar_t *key, bool &field, bool v) { field = v, ini_set(L"ghost_battle", key, std::to_wstring(int(v))); };
 		gb(L"enabled", c.ghost_battle, d.ghost_battle), gb(L"random_stage", c.gb_random_stage, d.gb_random_stage);
@@ -576,6 +633,12 @@ void overlay_panel()
 		c.mod_hud_x = d.mod_hud_x, ini_set(L"modifiers", L"hud_x", std::to_wstring(d.mod_hud_x));
 		c.mod_hud_y = d.mod_hud_y, ini_set(L"modifiers", L"hud_y", std::to_wstring(d.mod_hud_y));
 		c.mod_hud_scale = d.mod_hud_scale, ini_set(L"modifiers", L"hud_scale", std::to_wstring(d.mod_hud_scale));
+		c.mod_msg_x = d.mod_msg_x, ini_set(L"modifiers", L"message_x", std::to_wstring(d.mod_msg_x));
+		c.mod_msg_y = d.mod_msg_y, ini_set(L"modifiers", L"message_y", std::to_wstring(d.mod_msg_y));
+		c.mod_msg_scale = d.mod_msg_scale, ini_set(L"modifiers", L"message_scale", std::to_wstring(d.mod_msg_scale));
+		// the warmup options and the marker hiding (author 2026-11-16): their defaults too - warmups on, markers shown
+		warmup::set_on(true), warmup::set_cam_on(true), warmup::set_hide_markers(false);
+		warmup::set_test_keys(false), warmup::set_pose_tools(false);
 	}
 	ImGui::SameLine();
 	const bool armed = GetTickCount64() < g_ov.forget_armed;
@@ -611,7 +674,10 @@ void overlay_frame(IDXGISwapChain *sc)
 	const bool hint = GetTickCount64() < g_ov.hint_until;
 	const bool end_menu = gbm::tick(); // Ghost Battle end-of-match menu
 	const bool combo_rec = g_rec.f && g_rec.combo; // always visible while combos are being recorded
-	if (!g_menu_open && !hint && !end_menu && !combo_rec)
+	bool dev_label = false; // a dev-build label on screen
+	std::string dev_text;
+	dev_label = warmup::pose_label(dev_text);
+	if (!g_menu_open && !hint && !end_menu && !combo_rec && !dev_label)
 		return;
 	if (!g_ov.rtv)
 	{
@@ -643,9 +709,21 @@ void overlay_frame(IDXGISwapChain *sc)
 		ImGui::TextDisabled("%llu frames   Ctrl+F12 = stop", (unsigned long long)g_rec.frames);
 		ImGui::End();
 	}
+	if (dev_label)
+	{
+		const ImVec2 ds = ImGui::GetIO().DisplaySize;
+		const float s = std::clamp(ds.y / 800.0f, 1.0f, 3.0f);
+		ImGui::GetStyle().FontScaleMain = s;
+		ImGui::SetNextWindowPos(ImVec2(ds.x * 0.5f, ds.y - 40 * s), ImGuiCond_Always, ImVec2(0.5f, 1.0f));
+		ImGui::SetNextWindowBgAlpha(0.75f);
+		ImGui::Begin("##devlabel", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
+			ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoSavedSettings);
+		ImGui::TextUnformatted(dev_text.c_str());
+		ImGui::End();
+	}
 	if (g_menu_open)
 		overlay_panel();
-	else if (!end_menu)
+	else if (!end_menu && !dev_label)
 	{
 		const float s = std::clamp(ImGui::GetIO().DisplaySize.y / 800.0f, 1.0f, 3.0f);
 		ImGui::GetStyle().FontScaleMain = s;

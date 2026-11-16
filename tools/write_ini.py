@@ -9,7 +9,7 @@ defaults below are written (release template).
 import configparser
 import sys
 
-VERSION = "1.2a"  # keep in step with T7_VERSION_STR in src/main.cpp (letter = new ghost data, number = new features)
+VERSION = "1.3a"  # keep in step with T7_VERSION_STR in src/main.cpp (letter = new ghost data, number = new features)
 DOWNLOAD = "https://github.com/NobodyCatchMe-AZ92/T7-Ghost-AI"
 
 # (key, default, explanation)
@@ -29,12 +29,15 @@ AI = [
     ("adapt", "70", "0-100: how strongly the AI adapts to YOUR habits learned during play (kept per character you use)"),
     ("throw_break_chance", "0", "throw breaks: 0 = each player's own break rate from the replays (most ~5-15%), 1 = never, 2-100 = % chance (100 = always)"),
     ("wall_awareness", "1", "1 = on, 0 = off. Tick to let the location of nearby walls influence the Ghost's behaviors. Ghosts will sidestep away from walls, defend near corners, pressure you against walls."),
+    ("timer_awareness", "1", "1 = on, 0 = off. Tick to let the round timer influence the Ghost's behaviors: in the last 9 seconds of a round, a Ghost behind on life pressures you (quick strikes, lows, throws, moves that are plus on block); a Ghost ahead on life holds its lead (backdashes, guards, attacks far less). Wall awareness comes first."),
 ]
 PROFILES_NOTE = ("; per character id: c21=merged (default: all recorded players as one),\n"
                  "; c21=hybrid (best player's style, other players fill gaps + share punishes/combos), or c21=Katarina-P01 (that player only)")
 UI = [
     ("menu_key", "F1", "key that opens/closes the in-game settings panel: F1-F12, Insert, Home, End, PageUp, a letter...;\n"
                        "; modifiers allowed, e.g. Ctrl+F1, Shift+Home"),
+    ("warmup_test_keys", "0", "1 = on, 0 = off (default). Testing Hotkeys: F5 / F6 / F7 / F8 play P1's Round 1 / Down / Up / Final Round warmup (Shift = P2). Offline battles only."),
+    ("pose_tools", "0", "1 = on, 0 = off (default). Testing Hotkeys: records intros / win poses (pose_moves.txt); F9 / F10 / F11 preview them, F12 exports pose_export.txt as warmups. Offline battles only."),
 ]
 MODS = [
     ("no_rage", "0", "1 = on, 0 = off. No Rage: nobody gets rage (no rage damage boost, Rage Arts or Rage Drives). Offline battles only, takes effect immediately."),
@@ -49,7 +52,14 @@ MODS = [
     ("hud_x", "0", "Lifebar HUD X: moves the lifebar HUD (health bars, names, portraits, rage, timer, round markers, ranks, title plates) left (-) / right (+), -500..500 (a step = 2 HUD pixels). Every game mode, online too."),
     ("hud_y", "0", "Lifebar HUD Y: moves the lifebar HUD up (-) / down (+), -500..500 (a step = 2 HUD pixels). Every game mode, online too."),
     ("hud_scale", "100", "Lifebar HUD Size: in percent of the size Options > HUD Settings gives it (50-150), around the screen centre. Every game mode, online too."),
+    ("message_x", "0", "Round Messages X: moves the round messages (Round 1 / 2 / 3, Final Round, Ready?, Fight!, K.O., Perfect, Great ...) left (-) / right (+), -500..500 (a step = 2 HUD pixels). Every game mode, online too."),
+    ("message_y", "0", "Round Messages Y: moves the round messages up (-) / down (+), -500..500. Every game mode, online too."),
+    ("message_scale", "100", "Round Messages Size: the round messages' size in percent (50-150), around the screen centre. Every game mode, online too."),
     ("health", "100", "Health: both players' health bars in percent of normal (25-500; 200 = twice the damage to KO). Offline battles only, from the next round."),
+    ("warmup", "1", "1 = on, 0 = off. Warmup Animations: during \"Round N ... Fight!\" the fighters play a warmup animation for the situation (Round 1, match point up / down, final round) from Win64\\t7ghost\\warmup. Offline battles only."),
+    ("warmup_camera", "1", "1 = on, 0 = off. Warmup Cinematic Angles: Round 1 opens with a forward dolly instead of the overhead swoop, later rounds pick one of several camera shots (warmup\\camera_shots.txt) or the game's own; the lifebars and P1 / P2 markers fade in (warmup\\tuning.txt). Every game mode, online too (only your screen changes)."),
+    ("warmup_cam_curve", "6", "Warmup Cinematic Angles' Round 1 dolly pacing: 3, 4, 5 or 6 (default; 5 plus the Camera Distance scaling)."),
+    ("hide_markers", "0", "1 = hide, 0 = the game's normal markers. Hide P1/P2 Marker HUD: the P1 / P2 / YOU / CPU markers over the fighters at the start of each round. Every game mode, online too (only your screen changes)."),
 ]
 GB = [
     ("enabled", "1", "1 = on, 0 = off. Converts Treasure Battle into Ghost Battle - round counts affected by your Game Options, Random Stages every new match, and more."),
@@ -111,6 +121,8 @@ def main():
             for k, _, _ in MODS:
                 if k in cp["modifiers"]:
                     mod_vals[k] = cp["modifiers"][k]
+            if "warmup_hide_markers" in cp["modifiers"] and "hide_markers" not in cp["modifiers"]:  # old name (until 2026-11-16)
+                mod_vals["hide_markers"] = cp["modifiers"]["warmup_hide_markers"]
         if cp.has_section("profiles"):
             profiles = [f"{k}={v}" for k, v in cp["profiles"].items()]
         if cp.has_section("scan"):

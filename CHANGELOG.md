@@ -3,6 +3,52 @@
 Version numbers: the **number** changes when new features are added (v1.0a -> v1.1a), the **letter**
 changes when the Ghosts get new training data (v1.1a -> v1.1b).
 
+## v1.3a (2026-11-16)
+- **Ghost Battle uses your Game Options time limit** (30 / 40 / 50 / 60 / 99 seconds or infinite), like VS Battle and
+  Arcade - Treasure Battle always ran 60 seconds. The round count from the Game Options was already used.
+- **Timer awareness** (F1 > Ghost AI Settings, on by default): in the last 9 seconds of a round a Ghost behind on life
+  pressures you to take the lead back - quick strikes, lows, throws and moves that are plus on block, throws up close;
+  a Ghost ahead on life holds its lead - backdashes, guards more, attacks far less. Wall awareness comes first.
+- **Warmup Animations** (F1 > Game Modifiers): during "Round N ... Fight!" the fighters play a warmup
+  animation for the situation (Round 1, match point up / down, final round) - hands and fingers included - and
+  blend into their stance by "Fight!". All 51 characters; per-animation trimming and blending in
+  `warmup\tuning.txt`. Offline battles only; on by default.
+- **Warmup Cinematic Angles** (F1 > Game Modifiers): a forward dolly for "Round 1 ... Fight!" instead of the
+  overhead swoop, camera shots for the other rounds (match point, final round, three variations or the game's
+  own swoop as an adjustable shot "var4", at random; `warmup\camera_shots.txt`), and the lifebars and P1 / P2
+  markers fade in. Follows Camera Distance. Online friendly (every game mode, only your screen changes); on by
+  default.
+- **Round Messages X / Y / Size** (F1 > HUD & Screen Modifiers): move and resize the round messages (Round 1 / 2 /
+  3, Final Round, Ready?, Fight!, K.O., Perfect, Great ...) like the lifebar HUD. Online friendly.
+- **Hide P1/P2 Marker HUD** (F1 > HUD & Screen Modifiers): hides the P1 / P2 / YOU / CPU markers at the
+  start of each round. Every game mode, online too (only your screen changes).
+- F1 panel: new **HUD & Screen Modifiers** section (Camera Distance, camera height, Lifebar HUD X / Y / Size,
+  Hide P1/P2 Marker HUD - moved out of Game Modifiers); **Imitation Settings** is now **Ghost Imitation
+  Settings**, right under Ghost Battle Mode Settings.
+- **Wall awareness**: new state "back to the wall, you're far - approaching safely". With its back to a wall but you 3.25 m
+  or more away, a Ghost plays mostly as normal, dashes forward and sidesteps off the wall now and then, and rarely
+  backdashes (it used to stay defensive and could never catch a player turtling away). Behind on life in the last 9
+  seconds, Timer awareness takes over. The panel also shows the distance between the fighters.
+- **Ghost Battle end-of-match menu**:
+  - It now works with a keyboard and no controller. The game's own hidden menu no longer reacts underneath it - that
+    caused the missing "Choose a specific Opponent and Stage" row, left / right doing nothing, "Next Opponent" giving a
+    rematch, being sent to the main menu, and the menu not opening in the next run.
+  - It follows your own button settings.
+  - A controller plugged in mid-match works too.
+  - Moving and confirming play the game's own menu sounds.
+- **Choose a specific Opponent and Stage**: the CPU's character list no longer gets stuck after skipping a character
+  without a Ghost (e.g. right from Lars back to Lee).
+- **The DLL works under five names**: dinput8.dll (default), winmm.dll, version.dll, dsound.dll or xinput1_3.dll - rename
+  it if another mod already uses dinput8.dll or your PC doesn't load it. The Data Harvesters too.
+- `t7ghost.ini`: the marker option is now `hide_markers` (an older `warmup_hide_markers` is still read). Reset to defaults
+  also resets Warmup Animations, Warmup Cinematic Angles (both on) and Hide P1/P2 Marker HUD (off).
+- Warmups can be tuned per animation in `warmup\tuning.txt`: `blend`, `cut`, `cutstart`, `pin` and `travel` (how far the
+  fighter moves, in percent). The round 1 camera and the other round-start shots are keyframes in
+  `warmup\camera_shots.txt` (`round1` with `push`, `p1dom`, `p2dom`, `final`, `var1`-`var4`).
+- New F1 section **Testing Hotkeys** (both off by default): **Warmup animation test keys** (F5-F8 play a fighter's warmups
+  on demand) and **Pose tools** (records intros / win poses; F9 / F10 / F11 preview them, F12 exports them as warmups,
+  also as another character - `tools/warmup/POSE_EXPORT.md`). Warmup converters for Blender in `tools/warmup`.
+
 ## v1.2a (2026-11-10)
 - **Eddy and Zafina get Ghosts** (40 characters now, 77 recorded players), with recorded punishes and combo
   routes (normal hit, counter hit, low parry) like every other Ghost - 563 combo routes in all. New online

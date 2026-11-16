@@ -176,7 +176,7 @@ pressed words for that frame. Each frame, in order:
 - **Sidesteps.** The direction that evaded a move more often than it failed is used; which way an up-tap goes
   on each screen side is learned from the first clear sidestep.
 
-**Imitation** (`[profiles] c<char>`, F1 Imitation Settings): *merged* (default) = every player of the
+**Imitation** (`[profiles] c<char>`, F1 Ghost Imitation Settings): *merged* (default) = every player of the
 character as one profile; *hybrid* = the best profile (most frames) first, the others only fill situations it
 has no answer for (and compete for punishes / combos); or one named profile. Ghost Battle's "Random player per
 ghost" picks one recorded player per fight.
@@ -421,6 +421,31 @@ SW_UI_HUD's `_root.HUD_Top_mc`) as its base, then sets its own on top, the same 
 setters do (`0x4590F0` X, `0x459320` Y): GetVariable `0x1DBEE10`, then the display object's
 GetDisplayInfo / SetDisplayInfo (vtable `+0xD8` / `+0xE0`). Scaling is around the 1920 x 1080 stage's
 centre (960, 540); one slider step = 2 HUD pixels. Slider changes are applied on the game thread.
+
+## Warmups (`src/warmup.hpp`, `src/warmup_hud.hpp`)
+
+**Animations.** During the round call (battle block `exe+0x34CD4E0`: `+0x14` phase 3, `+0x200` round,
+`+0x20` / `+0x110` wins) each fighter is put into a copy of its stance move (0xB0 bytes; player `+0x1D4`
+move timer = 99999, `+0xDA0` next move) with the animation replaced by `warmup\<Char>_<Round1|Up|Down|Final>.bin`
+(0xC8 body animations) and the hand players (`+0x1460` / `+0x1480`) driven by `_HandL` / `_HandR`. The last
+frames are blended into the stance's own pose (decoded with the game's decoder `exe+0x73EA30`); `tuning.txt`
+sets blend / cut / cutstart / pin per character or animation. If the game replaces the move within 15
+frames it is restarted.
+
+**Cameras.** The round-start camera `exe+0x6F1F40` (hooked; eye `+0xB0`, look-at `+0xC0`) is overridden
+during the call phase: Round 1 = a forward dolly (monotone cubic curves; `warmup_cam_curve` 3-6), rounds 2+ =
+the key-framed shots of `camera_shots.txt` relative to the battle camera, scaled by Camera Distance.
+
+**Fades and markers.** The lifebar clips (see Lifebar HUD) get Scaleform display-info alpha (`+0x28`, flag
+`0x20`) from 0 to their own value over the `LifebarFade` / `LifebarFadeRounds` frames. The P1 / P2 / YOU / CPU
+markers are not Flash: the HUD actor's DrawHUD (`exe+0x264CD0`) sets the canvas colour (`exe+0x1810170`,
+FColor at canvas `+0x38`) and draws them as canvas icons in `exe+0x264870` (textures
+`OperationCH_Guide_*`, loaded by `exe+0x264D30`); the mod hooks `exe+0x264870` to scale the alpha byte
+(`+0x3B`) for the fade, or skip the draw (Hide P1/P2 Marker HUD).
+
+**Pose tools.** Intro / win-pose moves are recorded as they play (`pose_moves.txt`), previewed with
+F9 / F10 / F11 and exported with F12 (`pose_export.txt`) by decoding every frame with the game's decoder
+and writing a 0xC8 file - see `tools/warmup/POSE_EXPORT.md`.
 
 ## Harvesters (`src/harvest.cpp`)
 
