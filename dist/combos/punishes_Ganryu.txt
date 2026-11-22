@@ -1,0 +1,8 @@
+# Ganryu punishes (analysis/punishes.py; kept = done 3+ times, not cut short)
+# kind needed_window punisher hits damage frames lead press reach open launches | moves id@frame(*=hit) | inputs held:frames | damage frames | notation
+char 52
+block 10 1635 1 19 10 10 7 1551 10 1 | 1635@0* | 0:6,4:1,49156:4,32772:1,4:1,0:7 | 9 | b+1+2  # P1 x3
+block 12 1561 2 24 31 10 6 1542 10 0 | 1561@0* 1563@13* | 0:6,32768:5,0:2,16384:4,0:24 | 11,30 | 2, 1  # P3 x2
+block 16 1681 1 17 16 10 3 1508 10 1 | 1681@0* | 0:1,8:1,10:1,32778:6,10:5,2:2,0:10 | 15 | df+2  # P5 x3
+low_block 11 1727 1 20 11 10 1 1709 10 0 | 1727@0* | 0:1,8192:3,0:4,8192:4,0:4,8192:5 | 10 | 4  # P6 x3
+low_block 14 1648 1 20 14 10 7 1585 10 1 | 1648@0* | 10:7,32778:3,10:4,32778:4,10:6 | 13 | df+2  # P7 x3

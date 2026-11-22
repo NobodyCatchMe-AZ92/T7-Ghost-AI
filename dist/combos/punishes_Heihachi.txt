@@ -1,0 +1,9 @@
+# Heihachi punishes (analysis/punishes.py; kept = done 3+ times, not cut short)
+# kind needed_window punisher hits damage frames lead press reach open launches | moves id@frame(*=hit) | inputs held:frames | damage frames | notation
+char 8
+block 10 1602 3 25 38 10 4 1516 10 1 | 1602@0* 1570@10* 1571@25* | 0:4,16384:5,0:5,16384:3,0:5,16384:3,0:7,32768:5,0:4,32768:4,0:3 | 9,24,37 | 1, 1, 1  # P2 x4
+block 13 1663 2 34 35 10 7 1400 10 0 | 1663@0* 1666@14* | 0:4,10:3,16394:5,10:1,8:1,0:1,32768:4,0:26 | 12,34 | df+1, 2  # P3 x3
+block 15 1707 1 23 11 10 9 1950 6 1 | 1707@0* | 0:2,8:5,2:2,32778:4,32776:1,32768:1,0:6 | 10 | df+2  # P4 EWGF (attempt #9; author: only the first and last EWGF attempts were accurate, both identical)
+low_block 11 1648 2 29 27 10 6 1705 10 0 | 1648@0* 1649@12* | 6:2,0:4,8192:4,0:5,8192:4,0:18 | 10,26 | 4, 4  # P7 x3
+low_block 13 1641 1 17 13 10 2 1551 10 0 | 1641@0* | 0:2,16384:5,0:4,16384:6,0:6 | 12 | 1  # P8 x3
+low_block 18 1645 2 30 40 10 9 1539 10 1 | 1645@0* 1646@18* | 0:9,4096:5,0:9,32768:2,49152:19,16384:6 | 17,39 | 3, 1+2  # P9 x3

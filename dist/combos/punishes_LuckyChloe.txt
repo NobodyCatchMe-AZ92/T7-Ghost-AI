@@ -1,0 +1,9 @@
+# LuckyChloe punishes (analysis/punishes.py; kept = done 3+ times, not cut short)
+# kind needed_window punisher hits damage frames lead press reach open launches | moves id@frame(*=hit) | inputs held:frames | damage frames | notation
+char 22
+block 10 1551 2 19 27 10 5 1526 10 0 | 1551@0* 1557@10* | 0:5,16384:4,0:3,32768:6,0:19 | 9,26 | 1, 2  # P1 x3
+block 12 1579 2 25 40 10 2 1338 10 0 | 1579@0* 1580@12* | 0:2,32768:3,0:6,32768:4,0:35 | 11,39 | 2, 2  # P2 x3
+block 15 1504 1 13 15 10 0 1833 10 1 | 1504@0* | 4105:3,9:5,4105:4,9:4,4105:4,9:3,4105:2 | 14 | uf+3  # P3 x4
+low_block 11 1766 1 15 11 10 1 1594 10 0 | 1766@0* | 0:1,8192:5,0:5,8192:4,0:3,8192:3 | 10 | 4  # P5 x3
+low_block 14 1796 2 20 36 10 5 1501 10 1 | 1796@0* 1797@15* | 0:5,16384:6,0:4,8192:5,0:26 | 13,35 | 1, 4  # P6 x3
+low_block 16 1751 1 20 16 10 0 1447 10 1 | 1751@0* | 32768:4,0:4,32768:5,0:4,32768:4,0:5 | 15 | 2  # P7 x3

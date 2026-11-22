@@ -1,0 +1,8 @@
+# Josie punishes (analysis/punishes.py; kept = done 3+ times, not cut short)
+# kind needed_window punisher hits damage frames lead press reach open launches | moves id@frame(*=hit) | inputs held:frames | damage frames | notation
+char 24
+block 10 1547 3 29 47 10 8 1506 10 0 | 1547@0* 1713@10* 1714@28* | 0:8,16384:6,0:2,8192:7,0:5,4096:5,0:24 | 9,27,46 | 1, 4, 3  # P1 x4
+block 12 1574 2 33 31 10 8 1355 10 1 | 1574@0* 1581@12* | 0:6,8:2,32776:3,8:2,0:2,8192:4,0:22 | 11,30 | f+2, 4  # P3 x3
+block 15 1655 1 13 15 10 9 2015 10 1 | 1655@0* | 0:6,8:1,10:2,32778:5,10:1,2:1,0:9 | 14 | df+2  # P4 x3
+low_block 11 1688 1 16 11 10 7 1625 10 0 | 1688@0* | 6:2,0:5,8192:4,0:10 | 10 | 4  # P5 x3
+low_block 13 1684 2 22 33 10 9 1493 10 1 | 1684@0* 1685@18* | 2:2,0:7,32768:5,0:4,16384:4,0:21 | 12,32 | 2, 1  # P6 x3

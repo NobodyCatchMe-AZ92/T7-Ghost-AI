@@ -1,0 +1,9 @@
+# Dragunov punishes (analysis/punishes.py; kept = done 3+ times, not cut short)
+# kind needed_window punisher hits damage frames lead press reach open launches | moves id@frame(*=hit) | inputs held:frames | damage frames | notation
+char 16
+block 10 1605 2 21 29 10 6 1560 10 0 | 1605@0 1558@3* 1568@13* | 0:6,16384:3,0:3,4096:5,0:22 | 9,28 | 1, 3  # P1 x3
+block 12 1595 2 27 30 10 8 1424 10 0 | 1595@0* 1599@13* | 0:8,8192:4,0:2,16384:4,0:22 | 11,29 | 4, 1  # P2 x3
+block 15 1696 1 14 15 10 1 1991 10 1 | 1696@0* | 10:1,32778:4,10:4,32778:4,10:3,32778:3,10:2,2:2,0:2 | 14 | df+2  # P3 x4
+low_block 11 1749 1 15 11 10 8 1712 10 0 | 1749@0* | 6:3,0:5,8192:6,0:7 | 10 | 4  # P4 x1
+low_block 12 1738 2 28 31 10 6 1677 10 1 | 1738@0* 1740@14* | 6:1,2:1,0:4,16384:4,0:4,4096:4,0:23 | 11,30 | 1, 3  # P6 x3
+low_block 15 1810 1 15 15 10 2 1394 10 1 | 1810@0* | 0:2,32768:4,0:4,32768:5,0:10 | 14 | 2  # P7 x3

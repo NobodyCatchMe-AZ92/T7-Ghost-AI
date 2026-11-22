@@ -1,0 +1,8 @@
+# Jack-7 punishes (analysis/punishes.py; kept = done 3+ times, not cut short)
+# kind needed_window punisher hits damage frames lead press reach open launches | moves id@frame(*=hit) | inputs held:frames | damage frames | notation
+char 11
+block 10 1585 1 20 10 10 3 1565 10 0 | 1585@0* | 8:3,32776:5,8:3,32776:4,8:5 | 9 | f+2  # P1 x3
+block 13 1558 2 36 37 10 7 1516 10 0 | 1558@0* 1559@22* | 0:7,16384:5,0:2,16384:5,0:28 | 12,36 | 1, 1  # P2 x3
+block 15 1667 1 13 15 10 7 1903 10 1 | 1667@0* | 32778:4,10:3,32778:4,10:5,32778:3,10:4,32778:2 | 14 | df+2  # P3 x4
+low_block 11 1700 1 20 11 10 4 1992 10 0 | 1700@0* | 6:1,0:3,8192:3,0:4,8192:6,0:4 | 10 | 4  # P4 x2
+low_block 15 1693 1 14 15 10 6 1743 10 1 | 1693@0* | 16384:2,0:4,16384:4,0:5,16384:5,0:5 | 14 | 1  # P6 x3
