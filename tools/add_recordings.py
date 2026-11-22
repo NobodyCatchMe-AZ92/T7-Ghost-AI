@@ -14,6 +14,9 @@ processing order (replays before live, by file name) - the same rules as the ori
     <left label> <right label>", you = P1 / P2 / - / ?) says which side was the recording player; a label "@P<n>"
     joins existing player P<n>, a letter label groups sides of this batch as one new player, "." = anonymous.
   * anonymous sides get a number of their own (one per side).
+  * Ghost Battle recordings (gb_*.jsonl, the dev build's own recorder - never in a public build): the header says
+    which side was the human and which the Ghost AI. The human side is --recorder (as replays); the Ghost's side is
+    the reserved pseudonym P00, which no profile and no frame data ever uses (author 2026-11-16).
 Recordings already in the dataset (same characters and round-end frames) and Practice sessions are skipped.
 Practice demonstrations (combo_*.jsonl, Ctrl+F12) in the folder go to <dataset>/combos (and combos/index.tsv).
 Name hashes never enter the dataset; with --registry they are stored in that PRIVATE file only (keep it, and the
@@ -66,7 +69,7 @@ def main():
 
     batch = a.batch or f"batch{len({r['batch'] for r in rows}) + 1:02d}"
     recs = bp.unique_recordings(load_dir(raw))
-    recs.sort(key=lambda r: (r.path.name.startswith("live_"), r.path.name))
+    recs.sort(key=lambda r: (r.path.name.startswith("live_") + 2 * r.path.name.startswith("gb_"), r.path.name))
     fresh = [r for r in recs if not is_duplicate(r, known)]
     print(f"{len(recs)} recordings, {len(recs) - len(fresh)} already in the dataset")
     # stand-in hashes: one hash over many different opponent characters
@@ -93,13 +96,19 @@ def main():
         # numbers are handed out side by side (left first), as the original pipeline numbers first appearances
         ns = [None, None]
         live = rec.path.name.startswith("live_")
-        if live:
+        ghost = rec.ghost_side  # Ghost Battle: the Ghost AI's side -> P00
+        if ghost is not None:
+            ns[ghost], ns[1 - ghost] = 0, me_no()
+            live = False
+        elif live:
             me = bp.live_side(rec)
             labels = bp.live_labels(rec)
         else:
             me = bp.self_side(rec)
             h = bp.opponent_hash(rec)
         for i in (0, 1):
+            if ns[i] is not None:
+                continue
             if i == me:
                 ns[i] = me_no()
             elif live and labels[i].upper().startswith("@P") and labels[i][2:].isdigit():
@@ -117,7 +126,8 @@ def main():
         seq += 1
         rel = f"{batch}/{rec.path.name}.gz"
         stamp = rec.path.name.split("_")[1] if "_" in rec.path.name else ""
-        row = {"seq": seq, "file": rel, "kind": "live" if live else "replay", "batch": batch,
+        kind = "ghostbattle" if ghost is not None else "live" if live else "replay"
+        row = {"seq": seq, "file": rel, "kind": kind, "batch": batch,
                "date": f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:8]}" if len(stamp) >= 8 else "-",
                "char1": rec.chars[0], "char2": rec.chars[1], "player1": f"P{ns[0]:02d}", "player2": f"P{ns[1]:02d}",
                "round_ends": ",".join(map(str, round_ends(rec))), "sha256": ""}

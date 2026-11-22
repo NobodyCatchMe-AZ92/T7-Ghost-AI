@@ -14,6 +14,7 @@
 #include "loader.hpp"
 #include "brain.hpp"
 #include "names.hpp"
+#include "harvest.hpp"
 #include "finder.hpp"
 #include <MinHook.h>
 #include <d3d11.h>
@@ -25,6 +26,7 @@
 #include <share.h>
 #include <tlhelp32.h>
 #include <psapi.h>
+#include <shellapi.h>
 #include <intrin.h>
 #include <Xinput.h>
 #include <timeapi.h>
@@ -42,9 +44,17 @@
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
+namespace jb { // Jukebox Infinity built in: jukebox/src/main.cpp (T7JB_EMBEDDED), see jukebox_embed.hpp
+bool embed_claim(HMODULE self, const std::wstring &win64, const std::wstring &log_name);
+void embed_start();
+uint32_t embed_post_flags(const wchar_t *ev, uint32_t flags);
+void embed_post_done(const wchar_t *ev, uint32_t r);
+const wchar_t *embed_version();
+}
+
 namespace {
 
-#define T7_VERSION_STR "1.3a" // keep in step with the t7ghost.ini header (tools/write_ini.py)
+#define T7_VERSION_STR "1.4a" // keep in step with the t7ghost.ini header (tools/write_ini.py)
 constexpr const char *kModVersion = T7_VERSION_STR;
 std::wstring g_dir; // .../Win64/t7ghost/
 FILE *g_log = nullptr;
@@ -95,12 +105,16 @@ bool hotkey(int vk)
 // ---------------------------------------------------------------- recorder
 finder::Finder g_finder; // health/rage field finder, fed while replays are recorded
 
+bool wb_name(uintptr_t move, char (&out)[24]); // the No Wall Bound code below: a move's name
 struct Recorder
 {
 	FILE *f = nullptr;
 	uint32_t last_fc = 0;
 	uint64_t frames = 0;
 	bool probed_late = false;
+	// frames only while the round is fought (battle phase 4, "Fight!" to the K.O.) - Ghost Battle recordings (author's first
+	// test 2026-11-16: the intros, round calls and warmup animations were recorded too and would become profile chunks)
+	bool fight_only = false;
 
 	// name hashes only (see names.hpp); written at open and again once the round is running
 	void write_probe(const char *when)
@@ -165,12 +179,29 @@ struct Recorder
 		open(stamp_name(L"rec_", L".jsonl"));
 	}
 
+#ifndef T7_PUBLIC
+	// Ghost Battle recording (dev build only): no name probe at all - the human is always the author, and the Ghost's
+	// in-game name is a real ranked player's - but a header that says which side was which (see gb_record_tick)
+	void open_gb(const std::wstring &path, int ghost, int ghost_char, const std::string &profile)
+	{
+		f = _wfsopen(path.c_str(), L"wb", _SH_DENYWR);
+		if (!f)
+			return;
+		last_fc = 0, frames = 0, probed_late = true, fight_only = true;
+		fprintf(f, "{\"ghost_battle\":{\"human\":\"p%d\",\"ghost\":\"p%d\",\"ghost_char\":%d,\"ghost_profile\":\"%s\"},"
+			"\"stage\":%d,\"mode\":%d,\"variant\":\"ghostbattle\",\"build\":%u}\n", 2 - ghost, ghost + 1, ghost_char, profile.c_str(),
+			t7::read_global(t7::kStageId), t7::read_global(t7::kGameMode), t7::exe_stamp());
+		logf("recorder: Ghost Battle %ls (you P%d, the Ghost P%d: %s)", path.c_str() + g_dir.size(), 2 - ghost, ghost + 1, profile.c_str());
+	}
+#endif
+
 	void open(const std::wstring &path, bool probe = true)
 	{
 		f = _wfsopen(path.c_str(), L"wb", _SH_DENYWR); // readable while the game runs
 		if (!f)
 			return;
 		last_fc = 0;
+		fight_only = false;
 		frames = 0;
 		probed_late = !probe; // combo recordings never store name codes
 		logf("recorder: started %ls", path.c_str());
@@ -196,6 +227,26 @@ struct Recorder
 			}
 			fputc('}', f);
 		}
+		if (combo)
+		{
+			// wall enders (v1.4 item 11, 2026-11-22): per side, the current reaction - 1 = a wall splat (wDm_*), 2 = a wall
+			// bound (sDm_PNGB_PON*), 0 = neither - from the snapshot's own current-move pointer (+0x218; reactions play
+			// from the attacker's moveset, names as in wb_patch), and the screw mark (+0xB08: -1 from a screw hit until the
+			// victim gets up). analysis/wall_enders.py cuts the ender out from the splat on.
+			int wall[2] = {}, screw[2] = {};
+			for (int p = 0; p < 2; ++p)
+			{
+				const uintptr_t pl = blk + p * t7::kP2;
+				uint64_t mv = 0;
+				char nm[24];
+				if (t7::rd(pl + 0x218, mv) && mv && wb_name(uintptr_t(mv), nm))
+					wall[p] = std::strncmp(nm, "wDm_", 4) == 0 ? 1 : std::strncmp(nm, "sDm_PNGB_PON", 12) == 0 ? 2 : 0;
+				int32_t sc = 0;
+				if (t7::rd(pl + 0xB08, sc))
+					screw[p] = sc;
+			}
+			fprintf(f, ",\"wall\":[%d,%d],\"screw\":[%d,%d]", wall[0], wall[1], screw[0], screw[1]);
+		}
 		fputs("}\n", f);
 		++frames;
 	}
@@ -218,6 +269,11 @@ struct Recorder
 			fprintf(f, "{\"reset\":1,\"from\":%u,\"to\":%u}\n", last_fc, newest);
 			logf("recorder: frame counter reset %u -> %u", last_fc, newest);
 			last_fc = 0;
+		}
+		if (fight_only && t7::read_global(0x34CD4E0 + 0x14) != 4) // not fighting: skip these frames (round resets still noted)
+		{
+			last_fc = newest;
+			return;
 		}
 		std::pair<uint32_t, uintptr_t> copies[t7::kRingCount];
 		int n = 0;
@@ -496,6 +552,17 @@ void read_ai_values(ghost::Settings &c)
 	// hidden option (author, 2026-10-19): not in the panel or the written ini; "taunts=0" typed into [ai]
 	// switches the Ghosts' taunts off
 	c.taunts = geti(L"ai", L"taunts", 1) != 0;
+	// v1.4 (author 2026-11-20): "Very Challenging" (4) inserted before "Unfair" - an ini from before (no ai_preset_list=2)
+	// that chose Unfair (4) moves to 5. Challenging stays 3 (its values are new: the old ones are Very Challenging now).
+	if (geti(L"ai", L"ai_preset_list", 1) < 2)
+	{
+		const int old = geti(L"ai", L"ai_preset", -1);
+		if (old == 4)
+			WritePrivateProfileStringW(L"ai", L"ai_preset", L"5", ini.c_str());
+		WritePrivateProfileStringW(L"ai", L"ai_preset_list", L"2", ini.c_str());
+		if (old == 4)
+			logf("settings: Ghost AI Preset Unfair moved from 4 to 5 (Very Challenging added)");
+	}
 	c.ai_preset = std::clamp(geti(L"ai", L"ai_preset", 3), 0, int(std::size(ghost::kAiPresets)) - 1);
 	ghost::apply_ai_preset(c, c.ai_preset);
 }
@@ -535,6 +602,7 @@ ghost::Brain *load_brain()
 	b->cfg.gb_native_menu = geti(L"ghost_battle", L"native_menu", 1) != 0;
 	b->cfg.gb_rename = geti(L"ghost_battle", L"rename", 1) != 0;
 	b->cfg.gb_hide_chests = geti(L"ghost_battle", L"hide_chests", 1) != 0;
+	b->cfg.gb_skip_chest_anim = geti(L"ghost_battle", L"skip_chest_opening", 1) != 0;
 	b->cfg.mod_no_rage = geti(L"modifiers", L"no_rage", 0) != 0;
 	b->cfg.mod_health = std::clamp(geti(L"modifiers", L"health", 100), 25, 500);
 	b->cfg.mod_no_pc = geti(L"modifiers", L"no_power_crush", 0) != 0;
@@ -670,6 +738,15 @@ ghost::Brain *load_brain()
 		}
 		logf("brain: %d punishes for %zu characters (punishment proficiency %d%%)", n, b->punishes.size(), b->cfg.punish_skill);
 		n = 0;
+		if (HANDLE h = FindFirstFileW((g_dir + L"combos\\walls_*.txt").c_str(), &fd); h != INVALID_HANDLE_VALUE)
+		{
+			int n = 0;
+			do
+				n += ghost::load_wall_enders(g_dir + L"combos\\" + fd.cFileName, b->walls);
+			while (FindNextFileW(h, &fd));
+			FindClose(h);
+			logf("brain: %d wall ender(s) for %zu characters", n, b->walls.size());
+		}
 		if (HANDLE h = FindFirstFileW((g_dir + L"combos\\taunts_*.txt").c_str(), &fd); h != INVALID_HANDLE_VALUE)
 		{
 			do
@@ -720,6 +797,7 @@ void ai_trace(ghost::Brain *b, uintptr_t p, uint32_t held, uint32_t pressed, int
 //   Arcade / Treasure Battle (if enabled): whichever side the game's CPU controls (+0x1570), either side;
 //   VS (two humans), online, replays, menus: never.
 const char *g_ai_mode = "";
+int ai_side(const ghost::Settings &cfg);
 int ai_side(const ghost::Settings &cfg)
 {
 	if (t7::read_global(t7::kGameMode) != t7::kModePractice) // mode 2 = every offline battle
@@ -744,6 +822,116 @@ int ai_side(const ghost::Settings &cfg)
 	}
 	return -1;
 }
+
+// ---- Data Harvesters (v1.4 item 9, 2026-11-21): the LIVE / Replay harvesters, built in (harvest.hpp), F1 > Data
+// Harvesters (optional). [harvesters] mode: 0 = off (default), 1 = LIVE, 2 = Replay. Only one harvester runs at a time:
+// in the dev build choosing one switches the Ghost Battle harvester off and the other way round.
+void set_harvest_mode(int m)
+{
+	m = std::clamp(m, 0, 2);
+	harvest::g_mode = m;
+	WritePrivateProfileStringW(L"harvesters", L"mode", std::to_wstring(m).c_str(), (g_dir + L"t7ghost.ini").c_str());
+	logf("harvesters: %s", m == 1 ? "LIVE match harvester on" : m == 2 ? "Replay harvester on" : "off");
+}
+void set_gb_record(bool on);
+void harvesters_init()
+{
+	harvest::g_mode = std::clamp(int(GetPrivateProfileIntW(L"harvesters", L"mode", 0, (g_dir + L"t7ghost.ini").c_str())), 0, 2);
+	const std::wstring win64 = g_dir.substr(0, g_dir.size() - std::wstring(L"t7ghost\\").size()); // .../Win64\ (g_dir = Win64\t7ghost\)
+	const bool ok = harvest::start(win64);
+	logf("harvesters: %s (mode %d)", ok ? "ready" : "unsupported game build", harvest::g_mode.load());
+}
+
+#ifndef T7_PUBLIC
+// ---- Ghost Battle recording (author 2026-11-16; DEV BUILD ONLY - never in a public build, download or harvester).
+// The Ghost AI is now good enough to play the author's real matches against: every Ghost Battle fight the Ghost
+// drives is recorded to t7ghost/ghostbattle/gb_<time>.jsonl (one file per fight), in the recorder's usual frame
+// format, with a first row {"ghost_battle": {"human": "p1|p2", "ghost": "p1|p2", "ghost_char": .., "ghost_profile":
+// ..}, "stage", "mode", "variant": "ghostbattle", "build"} and NO name probe. The pipeline never uses the Ghost's side
+// (analysis/load.py ghost_side; tools/add_recordings.py gives it the reserved pseudonym P00; build_profiles skips it,
+// framedata leaves its attacks out). [ghost_battle] record_matches=0 switches it off (on by default in the dev build).
+// Not a separate harvester DLL: the one-copy guard (loader.hpp) would keep a harvester idle next to the mod.
+// (author's first test 2026-11-16: also a 144-byte file from the loading screen - placeholder character 75, no profile -
+// and ~1 s fragments after the result window closed. So: the Ghost's character must have a profile; after a fight closes,
+// the same fight is not reopened (same characters and the frame counter not restarted); files under 600 frames go.)
+struct GbRec
+{
+	bool on = false;
+	int ghost = -1;
+	int32_t chars[2] = { -1, -1 };
+	ULONGLONG idle_since = 0;
+	std::wstring path;
+	int32_t done_chars[2] = { -1, -1 }; // the fight closed last (not reopened until a new fight starts)
+	uint32_t done_fc = 0;
+} g_gbr;
+std::atomic<bool> g_gb_record{ true };
+void set_gb_record(bool on) // F1 > Data Harvesters (optional)
+{
+	if (on && harvest::g_mode != harvest::kOff)
+		set_harvest_mode(harvest::kOff); // one harvester at a time
+	g_gb_record = on;
+	WritePrivateProfileStringW(L"ghost_battle", L"record_matches", on ? L"1" : L"0", (g_dir + L"t7ghost.ini").c_str());
+	logf("recorder: Ghost Battle data harvester %s", on ? "on" : "off");
+}
+void gb_record_tick()
+{
+	static ULONGLONG next_ini = 0; // the switch, reread every 2 s (no restart needed)
+	if (GetTickCount64() >= next_ini)
+	{
+		next_ini = GetTickCount64() + 2000;
+		g_gb_record = GetPrivateProfileIntW(L"ghost_battle", L"record_matches", 1, (g_dir + L"t7ghost.ini").c_str()) != 0 &&
+			harvest::g_mode == harvest::kOff; // the LIVE / Replay harvester is on: this one is off
+	}
+	ghost::Brain *b = g_brain;
+	const bool treasure = t7::read_global(t7::kBattleType) == t7::kBattleTreasure;
+	const bool result = t7::read_global(0x34D6C04) != 0; // gbm::kResultMenu: the fight is over
+	const int ai = b ? ai_side(b->cfg) : -1;
+	const bool want = g_gb_record && b && b->cfg.ghost_battle && treasure && ai >= 0 && !result && t7::ring_base() != 0;
+	if (g_rec.f && !g_gbr.on)
+		return; // something else is recording (replay / manual / combo lab)
+	int32_t c[2] = { -1, -1 };
+	if (const uintptr_t blk = t7::newest_block())
+		t7::rd(blk + 0xDC, c[0]), t7::rd(blk + t7::kP2 + 0xDC, c[1]);
+	if (g_gbr.on)
+	{
+		g_gbr.idle_since = want ? 0 : g_gbr.idle_since ? g_gbr.idle_since : GetTickCount64();
+		const bool other = want && (c[0] != g_gbr.chars[0] || c[1] != g_gbr.chars[1] || ai != g_gbr.ghost);
+		if (other || result || !g_rec.f || (g_gbr.idle_since && GetTickCount64() - g_gbr.idle_since > 5000))
+		{
+			const uint64_t frames = g_rec.frames;
+			if (g_rec.f)
+				g_rec.toggle();
+			g_gbr.on = false;
+			g_gbr.done_chars[0] = g_gbr.chars[0], g_gbr.done_chars[1] = g_gbr.chars[1];
+			t7::newest_block(&g_gbr.done_fc);
+			const bool junk = frames < 600; // under 10 s: a loading screen or the moment after the result window
+			if (junk)
+				DeleteFileW(g_gbr.path.c_str());
+			logf("recorder: Ghost Battle fight closed (%s, %llu frames%s)", result ? "result screen" : other ? "another fight" : "left the fight",
+				frames, junk ? " - too short, deleted" : "");
+		}
+		return;
+	}
+	if (!want || c[0] < 0 || c[1] < 0 || !b->profiles.count(c[ai]))
+		return; // (no profile: the loading screen's placeholder character, or not a Ghost)
+	uint32_t fc = 0;
+	t7::newest_block(&fc);
+	if (c[0] == g_gbr.done_chars[0] && c[1] == g_gbr.done_chars[1] && fc >= g_gbr.done_fc)
+		return; // the fight we just closed is still on screen (after its result window)
+	std::string label = b->profile_label(c[ai]);
+	label.erase(std::remove_if(label.begin(), label.end(), [](char ch) { return ch == '"' || ch == '\\' || uint8_t(ch) < 0x20; }), label.end());
+	CreateDirectoryW((g_dir + L"ghostbattle").c_str(), nullptr);
+	const std::wstring path = stamp_name(L"ghostbattle/gb_", L".jsonl");
+	g_rec.open_gb(path, ai, c[ai], label);
+	if (g_rec.f)
+	{
+		g_gbr.on = true, g_gbr.ghost = ai, g_gbr.chars[0] = c[0], g_gbr.chars[1] = c[1], g_gbr.idle_since = 0, g_gbr.path = path;
+		g_gbr.done_chars[0] = g_gbr.done_chars[1] = -1;
+	}
+}
+#else
+void gb_record_tick() {}
+#endif
 
 // Game Modifiers: offline battles only (game mode 2: Practice, VS, Arcade, Treasure / Ghost Battle - never
 // online or replays). Changes take effect at once; Health from the next round (health_tick).
@@ -958,6 +1146,7 @@ int64_t __fastcall round_cam_hook(uintptr_t self, uintptr_t a2, uintptr_t a3, ui
 	warmup::round_cam(self);
 	return r;
 }
+
 void install_cam_set()
 {
 	static const uint8_t pro[] = { 0x48, 0x83, 0xEC, 0x28, 0x0F, 0x10, 0x02, 0x0F, 0x11, 0x01 }; // sub rsp,0x28; movups xmm0,[rdx]; movups [rcx],xmm0
@@ -1262,6 +1451,8 @@ void mods_tick(uintptr_t p, int idx, const ghost::Brain *b)
 }
 
 #include "warmup.hpp"
+#include "jukebox_embed.hpp"
+#include "warmup_sound.hpp"
 
 std::atomic<uint32_t> g_decode_calls[3] = {}; // recon: decode_input calls for P1 / P2 / other objects
 std::atomic<uint32_t> g_decode_input[2] = {};  // recon: frames with any held input, per side
@@ -1278,6 +1469,7 @@ void __fastcall decode_hook(uintptr_t p, int side, uint32_t held, uint32_t press
 		mods_tick(p, idx, b);
 	if (idx >= 0)
 		warmup::tick(p, idx);
+		wsnd::tick(p, idx); // warmup sounds (cues, previews, Insert / Delete)
 	if (idx == 0)
 		gbm::native_tick_guarded(); // HUD sliders, lifebar fade, menu: every frame even without a pad (gbmenu.hpp)
 	const int ai = b ? ai_side(b->cfg) : -1;
@@ -1364,8 +1556,10 @@ bool install_hooks()
 	// the warmup options (and tuning / camera shots) at startup, so the F1 panel shows the saved state in the menus
 	// too - they used to be read only when the first fight started (author 2026-11-16: checkboxes showed unticked)
 	warmup::load_ini();
-	if (MH_Initialize() != MH_OK)
+	if (const MH_STATUS mh = MH_Initialize(); mh != MH_OK && mh != MH_ERROR_ALREADY_INITIALIZED) // the Jukebox may have started it
 		return false;
+	logf("jukebox: Jukebox Infinity %s %s%s%s", jbx::g_version.c_str(), jbx::g_active ? "on (built in)" : jbx::g_setting_at_start ? "COULD NOT START (t7jukebox log)" : "off (F1)",
+		jbx::g_standalone.empty() ? "" : " - standalone installed too: ", jbx::utf8(jbx::g_standalone).c_str());
 	auto target = reinterpret_cast<void *>(t7::exe_base() + kDecodeInput);
 	// sanity: expected prologue "mov [rsp+8],rbx; mov [rsp+18h],r8d"
 	static const uint8_t prologue[] = { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x44, 0x89, 0x44, 0x24, 0x18 };
@@ -1384,6 +1578,7 @@ bool install_hooks()
 	gb::install();
 	install_root_scale();
 	install_cam_set();
+	wsnd::install();
 	hud::install();
 	gbm::install();
 #ifndef T7_PUBLIC
@@ -1673,9 +1868,10 @@ DWORD WINAPI worker(void *)
 			L"The game itself runs normally; the mod stays switched off.");
 		return 0;
 	}
+	harvesters_init(); // idle unless the player switches a harvester on (F1 > Data Harvesters)
 #ifdef T7_PUBLIC
-	// public build: the AI and its learning only - no recorders, traces, surveys, status file or dev
-	// hotkeys (and no name key: nothing about other players is read or written)
+	// public build: the AI and its learning, plus the opt-in data harvesters (off by default; their own name key,
+	// Win64/t7GhostDataRecorder_private) - no dev recorders, traces, surveys, status file or dev hotkeys
 	g_brain = load_brain();
 	install_hooks();
 	overlay_install();
@@ -1685,6 +1881,7 @@ DWORD WINAPI worker(void *)
 			g_brain = load_brain(), load_menu_key(); // old brain intentionally leaked: the game thread may still hold it
 		overlay_tick();
 		gbt::tick(); // "GHOST BATTLE" in the menus
+		wsnd::gm_tick();
 		Sleep(15);
 	}
 #endif
@@ -1727,9 +1924,11 @@ DWORD WINAPI worker(void *)
 		}
 		overlay_tick();
 		g_rec.auto_mode();
+		gb_record_tick();
 		survey_tick();
 		watch_tick();
 		warmup::worker_tick();
+		wsnd::gm_tick();
 		g_rec.poll();
 		if (g_rec.f && g_rec.automatic)
 		{
@@ -1768,6 +1967,8 @@ BOOL APIENTRY DllMain(HMODULE mod, DWORD reason, LPVOID)
 		g_dir = g_dir.substr(0, g_dir.find_last_of(L"\\/") + 1) + L"t7ghost\\";
 		CreateDirectoryW(g_dir.c_str(), nullptr);
 		g_log = _wfsopen((g_dir + L"t7ghost.log").c_str(), L"ab", _SH_DENYWR);
+		// Jukebox Infinity (v1.4 item 12): its music hooks go in now, before any other DLL's startup thread runs
+		jbx::install(mod, g_dir + L"t7ghost.ini");
 		CloseHandle(CreateThread(nullptr, 0, worker, nullptr, 0, nullptr));
 	}
 	return TRUE;

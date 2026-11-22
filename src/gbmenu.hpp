@@ -241,8 +241,10 @@ uint32_t *__fastcall in_trig_hook(uintptr_t dlg, uint32_t *out)
 // the result dialog's per-frame update (also while it waits on its timer +0xC8, e.g. under Simple Select)
 using DlgUpdateFn = void(__fastcall *)(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 DlgUpdateFn g_dlg_update_orig = nullptr;
+std::atomic<ULONGLONG> g_dlg_tick{ 0 }; // last time any game dialog updated (the Replay harvester's "replay over")
 void __fastcall dlg_update_hook(uintptr_t dlg, uintptr_t a2, uintptr_t a3, uintptr_t a4)
 {
+	g_dlg_tick = GetTickCount64();
 	if (t7::read_global(t7::kBattleType) == t7::kBattleTreasure && t7::read_global(kResultMenu) != 0)
 		native_tick_guarded();
 	g_dlg_update_orig(dlg, a2, a3, a4);
@@ -328,7 +330,7 @@ bool native_build(uintptr_t w)
 // +0xA00 (0x378 apart): +0x25C character id, +0x23C customized slot (Default 1-4, the presets, then the player's
 // customizations), +0x218 side; +0x670 = 1 when backed out with B. Game thread only.
 constexpr uintptr_t kSsCreate = 0x3F25B0, kSsDestroy = 0x556440, kCharSelectOwner = 0x34D5B90, kOwnerVtable = 0x27DE610;
-struct SsResult { int p1_char = -1, p1_slot = 0, p1_side = 0, cpu_char = -1, cpu_slot = 0, cpu_side = 0; bool cancelled = true; };
+struct SsResult { int p1_char = -1, p1_slot = 0, p1_side = 0, cpu_char = -1, cpu_slot = 0, cpu_side = 0, p1_listed = -1, cpu_listed = -1; bool cancelled = true; };
 uintptr_t g_ss_obj = 0, g_ss_owner = 0;
 int g_ss_cpu_last = -1; // the CPU list position char_refresh_hook last settled on (game thread; -1 = none yet)
 bool ss_open()
@@ -342,6 +344,7 @@ bool ss_open()
 	}
 	g_ss_owner = uintptr_t(own);
 	g_ss_cpu_last = -1;
+	gb::ss_clean_costumes();
 	g_ss_obj = gb::fn<uintptr_t(__fastcall *)(uintptr_t)>(kSsCreate)(g_ss_owner + 0x50);
 	if (g_ss_obj)
 		*reinterpret_cast<volatile uint8_t *>(g_ss_obj + 0x640) = 1;
@@ -362,10 +365,11 @@ bool ss_poll(SsResult &r) // true once it is finished (then it is closed)
 	const uintptr_t p1 = g_ss_obj + 0x688, cpu = g_ss_obj + 0xA00;
 	t7::rd(p1 + 0x25C, r.p1_char), t7::rd(p1 + 0x23C, r.p1_slot), t7::rd(p1 + 0x218, r.p1_side);
 	t7::rd(cpu + 0x25C, r.cpu_char), t7::rd(cpu + 0x23C, r.cpu_slot), t7::rd(cpu + 0x218, r.cpu_side);
+	t7::rd(p1 + 0x248, r.p1_listed), t7::rd(cpu + 0x248, r.cpu_listed); // how many costumes each list holds
 	t7::rd(g_ss_obj + 0x670, cancel);
 	r.cancelled = cancel != 0;
-	logf("simple select: %s - P1 char %d slot %d side %d, CPU char %d slot %d side %d", r.cancelled ? "backed out" : "confirmed",
-		r.p1_char, r.p1_slot, r.p1_side, r.cpu_char, r.cpu_slot, r.cpu_side);
+	logf("simple select: %s - P1 char %d slot %d of %d side %d, CPU char %d slot %d of %d side %d", r.cancelled ? "backed out" : "confirmed",
+		r.p1_char, r.p1_slot, r.p1_listed, r.p1_side, r.cpu_char, r.cpu_slot, r.cpu_listed, r.cpu_side);
 	ss_close();
 	return true;
 }
@@ -392,8 +396,8 @@ void ss_test_tick()
 // other panel. Hooked: on our Simple Select, CPU panel, cursor on row 2 (+0x200), it undoes the flip and steps the
 // stage instead; the row's texts are rewritten every frame while it is open (simple_tick).
 struct StageEntry { int id; const char *name; };
-constexpr StageEntry kStageMenu[] = { { -1, "Random" }, { 0, "Mishima Dojo" }, { 1, "Forgotten Realm" }, { 2, "Jungle Outpost (evening)" },
-	{ 3, "Arctic Snowfall" }, { 4, "Twilight Conflict (day)" }, { 5, "Dragon's Nest" }, { 6, "Souq" }, { 7, "Devil's Pit" },
+constexpr StageEntry kStageMenu[] = { { -1, "Random" }, { 0, "Mishima Dojo" }, { 1, "Forgotten Realm" }, { 2, "Jungle Outpost (evening)" }, { 53, "Jungle Outpost (day)" },
+	{ 3, "Arctic Snowfall" }, { 4, "Twilight Conflict (day)" }, { 54, "Twilight Conflict (evening)" }, { 5, "Dragon's Nest" }, { 6, "Souq" }, { 7, "Devil's Pit" },
 	{ 8, "Mishima Building" }, { 9, "Abandoned Temple" }, { 30, "Duomo di Sirio" }, { 31, "Arena" }, { 32, "G Corp Helipad (day)" },
 	{ 33, "G Corp Helipad (night)" }, { 35, "Brimstone and Fire" }, { 36, "Precipice of Fate" }, { 37, "Violet Systems" },
 	{ 39, "Kinder Gym" }, { 40, "Infinite Azure" }, { 41, "Geometric Plane" }, { 51, "Howard Estate" }, { 52, "Hammerhead" },
@@ -527,6 +531,8 @@ void simple_tick() // game thread, while g_state == kSimple
 	if (d)
 		*reinterpret_cast<volatile double *>(d + 0xC8) = 0.5; // the window ignores the pads meanwhile
 	ss_stage_texts();
+	if (g_ss_obj)
+		gb::ss_restore_tick(g_ss_obj);
 	SsResult r;
 	if (!ss_poll(r))
 		return;
@@ -551,11 +557,11 @@ void simple_tick() // game thread, while g_state == kSimple
 		if (const auto it = by_char.find(c.ch); it != by_char.end() && !it->second.empty())
 			c.name = gb::ghost_name(it->second[gb::g_rng() % it->second.size()]);
 	}
-	gb::ss_costume(c.ch, r.cpu_slot, c.costume, c.own);
+	gb::ss_costume(c.ch, r.cpu_slot, c.costume, c.own, r.cpu_listed);
 	c.stage = kStageMenu[g_ss_stage].id; // -1 = Random (the usual random stage)
 	c.my_ch = r.p1_char;
 	if (r.p1_char >= 0)
-		gb::ss_costume(r.p1_char, r.p1_slot, c.my_costume, c.my_own);
+		gb::ss_costume(r.p1_char, r.p1_slot, c.my_costume, c.my_own, r.p1_listed);
 	{
 		std::lock_guard lk(gb::g_choice_mx);
 		gb::g_choice = c;
@@ -1032,6 +1038,42 @@ void install_native()
 	logf("gbm: dialog cursor hooked (native look)");
 }
 
+// The Replay harvester's presses (v1.4, author 2026-11-21: harvest replays with the game in the background). Every menu
+// reads its input from the input manager [exe+0x34D5B78]: exe+0x3ED510(mgr, out, player) = held / auto-repeat bits,
+// exe+0x3ED5F0 = newly pressed bits (171 callers; the result dialog's in_rep / in_trig read the same two). Up 1, Down 2,
+// Left 4, Right 8, Confirm 0x1000. The hooks add harvest::inject_bits() - nothing unless a replay run is pressing.
+using MenuInFn = uint32_t *(__fastcall *)(uintptr_t, uint32_t *, int);
+MenuInFn g_menu_rep_orig = nullptr, g_menu_trig_orig = nullptr;
+uint32_t *__fastcall menu_rep_hook(uintptr_t mgr, uint32_t *out, int player)
+{
+	uint32_t *r = g_menu_rep_orig(mgr, out, player);
+	if (harvest::g_inject && out)
+		*out |= harvest::inject_bits(false);
+	return r;
+}
+uint32_t *__fastcall menu_trig_hook(uintptr_t mgr, uint32_t *out, int player)
+{
+	uint32_t *r = g_menu_trig_orig(mgr, out, player);
+	if (harvest::g_inject && out)
+		*out |= harvest::inject_bits(true);
+	return r;
+}
+void install_menu_inject()
+{
+	static const uint8_t pro[] = { 0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48 };
+	auto *rp = reinterpret_cast<void *>(t7::exe_base() + 0x3ED510), *tg = reinterpret_cast<void *>(t7::exe_base() + 0x3ED5F0);
+	const bool ok = std::memcmp(rp, pro, sizeof pro) == 0 && std::memcmp(tg, pro, sizeof pro) == 0 &&
+		MH_CreateHook(rp, reinterpret_cast<void *>(&menu_rep_hook), reinterpret_cast<void **>(&g_menu_rep_orig)) == MH_OK &&
+		MH_CreateHook(tg, reinterpret_cast<void *>(&menu_trig_hook), reinterpret_cast<void **>(&g_menu_trig_orig)) == MH_OK &&
+		MH_EnableHook(rp) == MH_OK && MH_EnableHook(tg) == MH_OK;
+	if (ok && g_dlg_update_orig)
+	{
+		harvest::g_dialog_up = [] { return GetTickCount64() - g_dlg_tick.load() < 200; };
+		harvest::g_focusless = true;
+	}
+	logf("harvesters: background replay navigation %s", harvest::g_focusless ? "on (menu input + dialog hooks)" : "OFF - the Replay run needs the game in front");
+}
+
 bool install()
 {
 	HMODULE xi = GetModuleHandleW(L"xinput1_3.dll");
@@ -1044,6 +1086,7 @@ bool install()
 	}
 	logf("gbm: XInput hooked (end-of-match menu)");
 	install_native();
+	install_menu_inject();
 	return true;
 }
 } // namespace gbm

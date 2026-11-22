@@ -95,6 +95,57 @@ struct Route
 };
 using Routes = std::unordered_map<int, std::vector<Route>>; // by character id
 
+// Wall enders (v1.4 item 11, 2026-11-22; analysis/wall_enders.py -> combos/walls_<char>.txt): the author's wall combo
+// for a character, as inputs from the frame the opponent's wall splat starts. One per character.
+struct WallEnder { int frames = 0, damage = 0, reach = 0; std::vector<uint32_t> inputs; std::vector<std::pair<int, int>> hits; std::string notation; };
+using WallEnders = std::unordered_map<int, WallEnder>; // by character id
+// "char <id>" then "ender <frames> <damage> [reach] | held:frames,... | frame:damage,... | notation"
+inline int load_wall_enders(const std::wstring &path, WallEnders &out)
+{
+	std::ifstream in(path);
+	std::string line;
+	int ch = -1, n = 0;
+	while (std::getline(in, line))
+	{
+		if (line.rfind("char ", 0) == 0)
+			ch = std::atoi(line.c_str() + 5);
+		if (ch < 0 || line.rfind("ender ", 0) != 0)
+			continue;
+		std::vector<std::string> f;
+		for (size_t a = 0, b; a <= line.size(); a = b + 1)
+		{
+			b = line.find('|', a);
+			if (b == std::string::npos)
+				b = line.size();
+			f.push_back(line.substr(a, b - a));
+		}
+		if (f.size() < 4)
+			continue;
+		WallEnder w;
+		std::string tag;
+		std::istringstream h(f[0]);
+		h >> tag >> w.frames >> w.damage;
+		if (!(h >> w.reach)) // optional: the first move's reach (Claudio's df+3 is short), 0 = the usual 2.5 m
+			w.reach = 0;
+		std::istringstream inp(f[1]);
+		for (std::string t; std::getline(inp, t, ',');)
+			if (const size_t c = t.find(':'); c != std::string::npos)
+				w.inputs.insert(w.inputs.end(), std::atoi(t.c_str() + c + 1), uint32_t(std::stoul(t.substr(0, c))));
+		std::istringstream hs(f[2]);
+		for (std::string t; std::getline(hs, t, ',');)
+			if (const size_t c = t.find(':'); c != std::string::npos)
+				w.hits.push_back({ std::atoi(t.c_str()), std::atoi(t.c_str() + c + 1) });
+		w.notation = f[3];
+		w.notation.erase(0, w.notation.find_first_not_of(' '));
+		w.notation.erase(w.notation.find_last_not_of(' ') + 1);
+		if (w.inputs.empty())
+			continue;
+		out[ch] = std::move(w);
+		++n;
+	}
+	return n;
+}
+
 // one file: "char <id>" then one route per line:
 // starter launcher hits damage frames lead | id@frame ... | held:frames,... | frame:carry,... | notation # ...
 inline int load_routes(const std::wstring &path, Routes &out)
@@ -365,6 +416,10 @@ struct Snap
 	int age;             // frames since this move started (set by the brain; ring fields lag at first)
 	float distance;
 	bool valid;
+	// wall enders (v1.4 item 11): the reaction this fighter is in - 1 = a wall splat (wDm_*), 2 = a wall bound
+	// (sDm_PNGB_PON*), 0 = neither (current move +0x218, name at its +0; reactions play from the attacker's moveset) -
+	// and the screw mark (+0xB08: -1 from a screw hit until they get up)
+	int32_t wall_react, screw;
 };
 
 // obj = live player object; ring_pl = this player's block in the newest ring snapshot. startup
@@ -382,6 +437,12 @@ inline Snap snap(uintptr_t obj, uintptr_t ring_pl)
 		t7::rd(obj + 0x1618, s.pz) && t7::rd(obj + 0x123C, s.side) && t7::rd(obj + 0x360, s.damage_taken) &&
 		t7::rd(obj + 0x788, s.cancel_window);
 	s.attack_type = at;
+	s.wall_react = 0, s.screw = 0;
+	uint64_t mv = 0, np = 0;
+	char nm[16] = {};
+	if (t7::rd(obj + 0x218, mv) && mv && t7::rd(uintptr_t(mv), np) && np && t7::safe_copy(nm, uintptr_t(np), 12))
+		s.wall_react = std::strncmp(nm, "wDm_", 4) == 0 ? 1 : std::strncmp(nm, "sDm_PNGB_PON", 12) == 0 ? 2 : 0;
+	t7::rd(obj + 0xB08, s.screw);
 	s.startup = s.startup_end = 0;
 	if (ring_pl)
 		t7::rd(ring_pl + 0x7780, s.startup), t7::rd(ring_pl + 0x7784, s.startup_end);
@@ -411,7 +472,7 @@ inline int remaining(const Snap &s) { return std::max(0, s.recovery - s.move_tim
 struct Settings
 {
 	bool enabled = true;
-	int ai_preset = 3;          // Ghost AI Preset: 0 = Custom Settings (the ini's own values), 1-4 = kAiPresets (default Challenging)
+	int ai_preset = 3;          // Ghost AI Preset: 0 = Custom Settings (the ini's own values), 1-5 = kAiPresets (default Challenging)
 	int reaction_frames = 14;   // perception delay for the opponent's actions
 	int input_read_chance = 0;  // % per opponent move: perceived instantly instead of after the delay
 	bool punish = true;         // always punish when a punisher from the profile fits the window
@@ -460,6 +521,7 @@ struct Settings
 	bool gb_native_menu = true;     //   ...drawn in the game's own result window (off = the overlay)
 	bool gb_rename = true;          //   "TREASURE BATTLE" -> "GHOST BATTLE" in the menus (gbtext.hpp)
 	bool gb_hide_chests = true;     //   no treasure chest icons on the match HUD (results screen keeps them)
+	bool gb_skip_chest_anim = true; //   no chest opening animation on the results screen (the unlocked-item popups stay; v1.4)
 	// Game Modifiers (2026-10-19; offline battles only - mods_tick; Health from the next round, everything else at once)
 	bool mod_no_rage = false;       //   nobody gets rage
 	int mod_health = 100;           //   both players' max health in percent (25-500)
@@ -480,15 +542,17 @@ struct Settings
 // Ghost AI presets (F1 "Ghost AI Preset", 2026-10-19). While one is chosen the Ghost AI sliders are
 // locked to it; the ini keeps the custom values for "Custom Settings".
 struct AiValues { int reaction, read, guard, decision, adapt, throw_break, punish, combo; bool walls; bool timers = true; };
-inline constexpr const char *kAiPresetNames[] = { "Custom Settings", "Fair", "Medium Challenge", "Challenging", "Unfair" };
+inline constexpr const char *kAiPresetNames[] = { "Custom Settings", "Basic", "Medium Challenge", "Challenging", "Very Challenging", "Unfair" };
 inline constexpr AiValues kAiPresets[] = {
 	{},
-	// Fair: the recorded players as they were - human reaction time, no input reading, the players' own
+	// Basic ("Fair" until v1.4, author 2026-11-20): the recorded players as they were - human reaction time, no input reading, the players' own
 	// guarding, punishing, throw breaks and combos, little steering by statistics or adaptation
 	{ 15, 0, 50, 30, 30, 0, 0, 0, true },
 	// Medium Challenge: halfway to Challenging
 	{ 12, 30, 80, 50, 50, 25, 40, 1, true },
-	// Challenging: the author's own configuration
+	// Challenging (v1.4, author 2026-11-20): the author's current own configuration - the default
+	{ 11, 60, 80, 70, 70, 50, 75, 1, true },
+	// Very Challenging: the Challenging of v1.0a-v1.3 (the author's configuration back then)
 	{ 10, 70, 100, 70, 70, 50, 75, 1, true },
 	// Unfair: everything at the top - very fast reactions, reads every move, perfect guards, punishes
 	// and throw breaks, full adaptation
@@ -512,6 +576,7 @@ public:
 	walls::Map wallmap;                        // per-stage wall maps (walls.txt)
 	Routes routes;                             // the author's combo routes (combos/routes_<char>.txt)
 	Routes punishes;                           // the author's punishes (combos/punishes_<char>.txt)
+	WallEnders walls;                          // the author's wall enders (combos/walls_<char>.txt)
 	Taunts taunts;                             // the author's taunts after a KO (combos/taunts_<char>.txt)
 	// wall awareness status (shown in the settings panel)
 	enum WallState { kWsOff, kWsNoWalls, kWsCalm, kWsBack, kWsCornered, kWsPress, kWsBackFar };
@@ -554,6 +619,7 @@ public:
 		model_ = nullptr, model_char_ = -1, win_open_ = false, human_down_ = false, last_human_move_ = -1;
 		perfect_roll_ = 0, perfect_move_ = -1, perfect_used_ = false, block_stun_ = false, last_atk_key_ = 0, last_atk_level_ = 0;
 		route_ = nullptr, route_ocls_ = Cls::free, route_hp_ = 100, route_dt_ = 0, last_ch_frame_ = -1000, launch_frame_ = -1000, route_tried_ = -1;
+		wall_state_ = kWsNone, wall_jabs_ = 0, prev_wall_react_ = 0, prev_screw_ = 0, last_splat_frame_ = -1000, screw_ours_ = false;
 	}
 
 	bool has_profile(int char_id) const { return profiles.count(char_id) != 0; }
@@ -594,6 +660,24 @@ public:
 		Snap opp = snap(opp_obj, opp_ring);
 		if (!me.valid || !opp.valid)
 			return false;
+		// v1.4 item 4 (author 2026-11-20): a Ghost that lost the round - K.O.'d, or behind when the round ends on time
+		// (battle phase 5) - must not move or taunt: no inputs at all until the next round (the winner keeps control,
+		// taunts included). Without this it kept playing chunks / getups on the floor after the K.O.
+		{
+			const int phase = t7::read_global(0x34CD4E0 + 0x14);
+			const bool lost = me.hp <= 0 || (phase == 5 && me.hp < opp.hp);
+			if (lost)
+			{
+				if (!playing_.empty())
+					stop("lost the round");
+				if (!lost_round_)
+					last_event = "lost the round: no inputs until the next round", dbg.decided = true;
+				lost_round_ = true;
+				held = pressed = 0;
+				return true;
+			}
+			lost_round_ = false;
+		}
 		++frame_;
 		if (opp.move_id != age_move_)
 			age_move_ = opp.move_id, age_t0_ = frame_;
@@ -726,6 +810,7 @@ public:
 		my_age_ = int(frame_ - my_move_t0_);
 		taunt_tick(me, opp);
 		route_tick(me, opp);
+		wall_combo_tick(me, opp);
 
 		const int sit = situation(me, seen);
 		dbg.sit = sit, dbg.seen_move = seen.move_id, dbg.seen_atk = seen.attack_type, dbg.opp_move = opp.move_id;
@@ -1507,6 +1592,7 @@ private:
 	// ---- taunts (2026-10-19): when we KO them, 15% of the time (75% with >= 75% of our health left) we
 	// play one of the author's taunts for our character - in the seconds the winner keeps control
 	static constexpr int kTaunt = 6;
+	bool lost_round_ = false; // step(): this round is lost (K.O.'d / behind on time) - no inputs
 	int32_t taunt_prev_hp_ = 100;
 	void taunt_tick(const Snap &me, const Snap &opp)
 	{
@@ -1600,6 +1686,10 @@ private:
 			last_hit_frame_ = frame_, last_hit_move_ = me.move_id;
 		if (opp.hit == 10 || opp.hit == 11)
 			last_ch_frame_ = frame_;
+		// a wall combo in progress (carry, screw wait, ender) owns the inputs: a hit of the ender is not a new route's
+		// launcher (Eliza's b+1, 2 hit read as "CH 2" started a route over her ender's last hit, 2026-11-22)
+		if (wall_state_ != kWsNone)
+			return;
 		if (route_)
 		{
 			if (playing_kind_ != kRoute || playing_.empty())
@@ -1620,7 +1710,16 @@ private:
 			else if (oc == Cls::free)
 				why = "combo route: opponent recovered";
 			else if (route_cut_ >= 0 && t >= route_cut_)
+			{
+				if (walls.count(me.char_id) && cfg.combo_style != 0)
+				{
+					// v1.4 item 11: not dropped any more - a jab wall carry, then the wall ender on the splat
+					stop("combo route: wall close - wall carry"), dbg.decided = true, route_ = nullptr;
+					wall_state_ = kWsCarry, wall_jabs_ = 0, wall_t0_ = frame_;
+					return;
+				}
 				why = "combo route: wall close, ended early";
+			}
 			if (why)
 				stop(why), dbg.decided = true, route_ = nullptr;
 			return;
@@ -1697,6 +1796,141 @@ private:
 		snprintf(route_note_, sizeof route_note_, "combo route: %s%s (%d dmg)%s", sn[r->starter], r->notation.c_str(),
 			r->damage, route_cut_ >= 0 ? " - wall close, ends early" : "");
 		last_event = route_note_, dbg.decided = true;
+	}
+
+	// ---- wall combos (v1.4 item 11, 2026-11-22; author's design): with a recorded wall ender for our character, a
+	// wall splat of the opponent - from any hit of ours - starts the ender, timed from the splat's first frame as the
+	// author did it. A route that gets too close to the wall (where it used to end early) carries them with jabs until
+	// they splat; screwed by our combo within 2.5 m of the wall, the ender at once (no carry, no splat needed). Without an
+	// ender keep the old behaviour.
+	static constexpr int kWall = 7, kWallCarry = 8;   // playing_kind_ of the ender / a carry jab
+	static constexpr int kCarryJabs = 4;              // jabs tried before the carry gives up
+	static constexpr float kScrewWall = 2500;         // screwed by our combo with their back this close: the ender (author)
+	enum WallCombo { kWsNone, kWsCarry, kWsScrew, kWsSplat, kWsEnder };
+	int wall_state_ = kWsNone, wall_jabs_ = 0;
+	bool screw_ours_ = false;                         // their current screw came from our route / carry
+	// author (2026-11-22): after the screw, farther than this from them (most wall combo moves' reach) one forward dash
+	// first, then the ender
+	static constexpr float kEnderReach = 2500;
+	bool wall_from_screw_ = false;                    // this ender was started by a screw (not a splat)
+	int64_t wall_dash_t_ = -1;                        // frame the closing dash's last tap went in, -1 = none
+	int32_t prev_wall_react_ = 0, prev_screw_ = 0;
+	int64_t wall_t0_ = 0, last_splat_frame_ = -1000;
+	char wall_note_[200] = "";
+
+	void wall_combo_tick(const Snap &me, const Snap &opp)
+	{
+		// each hit on a splatted opponent restarts the splat (one frame out of wDm_): only a splat with no splat in the
+		// last 20 frames is a new one
+		const bool splat_start = opp.wall_react == 1 && prev_wall_react_ != 1 && frame_ - last_splat_frame_ > 20;
+		if (opp.wall_react == 1)
+			last_splat_frame_ = frame_;
+		const bool screw_start = opp.screw == -1 && prev_screw_ != -1;
+		prev_wall_react_ = opp.wall_react, prev_screw_ = opp.screw;
+		const auto it = walls.find(me.char_id);
+		if (cfg.combo_style == 0 || it == walls.end())
+		{
+			wall_state_ = kWsNone;
+			return;
+		}
+		const WallEnder &w = it->second;
+		// a screw from our combo (route or wall carry) - remembered until they get up (+0xB08 back from -1)
+		if (screw_start)
+			screw_ours_ = wall_state_ == kWsCarry || (!playing_.empty() && (playing_kind_ == kRoute || playing_kind_ == kWallCarry));
+		if (opp.screw != -1)
+			screw_ours_ = false;
+		// author (2026-11-22): screwed by our combo with their back within 2.5 m of the wall -> the ender right away, no
+		// splat needed and no carry (also when the route carries them that close after the screw)
+		if (screw_ours_ && wall_state_ != kWsEnder && wall_state_ != kWsSplat && wall_info.opp_back >= 0 && wall_info.opp_back < kScrewWall)
+		{
+			route_ = nullptr;
+			snprintf(wall_note_, sizeof wall_note_, "wall ender: %s (%d dmg) - screwed %.1f m from the wall", w.notation.c_str(),
+				w.damage, wall_info.opp_back / 1000.0f);
+			wall_state_ = kWsSplat, wall_t0_ = frame_, screw_ours_ = false; // once per screw
+			wall_from_screw_ = true, wall_dash_t_ = -1;
+		}
+		// after our screw near the wall the flight into it can take a while: that splat is ours however long since the hit
+		if (splat_start && wall_state_ != kWsEnder && wall_state_ != kWsSplat && (wall_state_ == kWsScrew || frame_ - last_hit_frame_ <= 40))
+		{
+			// the ender starts as soon as we can act (the recorded wait before it was the author's own recovery): held
+			// off here while our move still recovers, nothing else is started meanwhile
+			route_ = nullptr;
+			snprintf(wall_note_, sizeof wall_note_, "wall ender: %s (%d dmg)%s", w.notation.c_str(), w.damage,
+				wall_state_ == kWsCarry ? " - after the wall carry" : wall_state_ == kWsScrew ? " - after the screw" : "");
+			wall_state_ = kWsSplat, wall_t0_ = frame_;
+			wall_from_screw_ = false, wall_dash_t_ = -1;
+		}
+		const float reach = w.reach > 0 ? float(w.reach) : kEnderReach; // how far the ender's first move reaches
+		switch (wall_state_)
+		{
+		case kWsSplat:
+			// the closing dash (after a screw, out of reach): its taps play out, then forward stays held (a deeper dash)
+			// until we're in reach, for 20 frames at most
+			if (wall_dash_t_ >= 0 && ((!playing_.empty() && playing_kind_ == kWall) || (me.distance > reach && frame_ - wall_dash_t_ < 20)))
+			{
+				if (playing_.empty())
+					play(std::vector<uint32_t>(1, F), false, "wall: dashing in for the ender", kWall);
+				return;
+			}
+			// first input on the last frame of our own move's recovery (as a player buffers it, like the buffered punish),
+			// not after it: Leo's stance moves after a carry screw recover long and read as attacks until they end
+			if (cls(me) == Cls::free || (me.recovery > 0 && remaining(me) <= 1))
+			{
+				if (wall_from_screw_ && wall_dash_t_ < 0 && me.distance > reach)
+				{
+					// one quick forward dash (f x3, n x4, f: the players' usual taps) to close the gap first
+					std::vector<uint32_t> dash(kDashFrames, 0u);
+					std::fill(dash.begin(), dash.begin() + 3, F);
+					dash.back() = F;
+					stop("wall: screwed out of reach - dash in"), dbg.decided = true;
+					play(dash, false, "wall: dash in for the ender", kWall);
+					wall_dash_t_ = frame_ + kDashFrames;
+					wall_t0_ = frame_; // the give-up timer restarts with the dash
+					return;
+				}
+				stop("wall splat - the ender"), dbg.decided = true;
+				play(w.inputs, false, wall_note_, kWall);
+				wall_state_ = kWsEnder;
+			}
+			else if (frame_ - wall_t0_ > 90 || (opp.wall_react == 0 && opp.screw != -1 && frame_ - last_splat_frame_ > 20))
+				wall_state_ = kWsNone, last_event = "wall: off the wall before the ender - own habits", dbg.decided = true;
+			else if (playing_.empty() || playing_kind_ != kWall)
+				play(std::vector<uint32_t>(1, 0u), false, "wall splat: the ender as soon as we can act", kWall);
+			return;
+		case kWsEnder:
+			if (playing_.empty() || playing_kind_ != kWall)
+				wall_state_ = kWsNone;
+			return;
+		case kWsScrew:
+			if (frame_ - wall_t0_ > 90 || (cls(opp) != Cls::juggled && opp.wall_react == 0 && frame_ - wall_t0_ > 20))
+				wall_state_ = kWsNone, last_event = "wall: the screw did not splat them - own habits", dbg.decided = true;
+			return;
+		case kWsCarry:
+			// a carry press that screwed them (e.g. Leo: a route leaves him in a stance where 1 is a screw move, not a
+			// jab) further than 2.5 m out (closer is handled above): no more jabs, the ender on the splat (author, 2026-11-22)
+			if (screw_start)
+			{
+				stop("wall carry: screwed them - the ender on the splat or within 2.5 m"), dbg.decided = true;
+				wall_state_ = kWsScrew, wall_t0_ = frame_;
+				return;
+			}
+			if (cls(opp) != Cls::juggled || wall_jabs_ >= kCarryJabs)
+			{
+				if (playing_.empty() || playing_kind_ != kWallCarry)
+					wall_state_ = kWsNone, last_event = "wall carry: no splat - own habits", dbg.decided = true;
+				return;
+			}
+			if (playing_.empty())
+			{
+				std::vector<uint32_t> jab(12, 0u);
+				jab[0] = jab[1] = B1;
+				play(jab, false, "wall carry: jab", kWallCarry);
+				++wall_jabs_;
+			}
+			return;
+		default:
+			break;
+		}
 	}
 
 	void stop(const char *why)

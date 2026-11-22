@@ -44,10 +44,11 @@ void warn_user(const wchar_t *text)
 // "F1 dead after the first native menu" bug of 2026-10-19 was a row-array overrun in gbmenu.hpp.)
 std::atomic<bool> g_menu_key_msg{ false };
 int menu_vk(); // the menu key's virtual key (defined with g_menu_key below)
+bool menu_mods_match(); // Ctrl / Shift / Alt exactly as the menu key wants (author 2026-11-20: Shift+F3 also opened on F3)
 
 LRESULT CALLBACK overlay_wndproc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
-	if ((m == WM_KEYDOWN || m == WM_SYSKEYDOWN) && !(l & (1 << 30)) && int(w) == menu_vk())
+	if ((m == WM_KEYDOWN || m == WM_SYSKEYDOWN) && !(l & (1 << 30)) && int(w) == menu_vk() && menu_mods_match())
 		g_menu_key_msg = true;
 	if (g_menu_open)
 	{
@@ -64,6 +65,12 @@ std::wstring ini_path() { return g_dir + L"t7ghost.ini"; }
 // [ui] menu_key: a key name with optional modifiers, e.g. F1, Insert, Ctrl+F1, Shift+Home, P
 struct MenuKey { int vk = VK_F1; bool ctrl = false, shift = false, alt = false; std::string name = "F1"; } g_menu_key;
 int menu_vk() { return g_menu_key.vk; }
+bool menu_mods_match()
+{
+	const auto held = [](int vk) { return (GetKeyState(vk) & 0x8000) != 0; }; // the state as of this window message
+	const MenuKey &k = g_menu_key;
+	return held(VK_CONTROL) == k.ctrl && held(VK_SHIFT) == k.shift && held(VK_MENU) == k.alt;
+}
 
 void load_menu_key()
 {
@@ -129,6 +136,69 @@ bool menu_key_pressed()
 void ini_set(const wchar_t *sec, const wchar_t *key, const std::wstring &val)
 {
 	WritePrivateProfileStringW(sec, key, val.c_str(), ini_path().c_str());
+}
+
+// Menu key binding from the panel (v1.4 item 5, 2026-11-20): "Change" arms a capture; the worker thread takes the next key
+// load_menu_key understands (with Ctrl / Shift / Alt as held), writes [ui] menu_key and reloads it. Esc cancels.
+std::atomic<bool> g_key_capture{ false };
+std::atomic<int> g_key_release_vk{ 0 }; // the key just bound: no menu toggle until it is released
+std::string key_ini_name(int vk)
+{
+	if (vk >= VK_F1 && vk <= VK_F24)
+		return "F" + std::to_string(vk - VK_F1 + 1);
+	if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9'))
+		return std::string(1, char(vk));
+	if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9)
+		return "NUMPAD" + std::to_string(vk - VK_NUMPAD0);
+	static const std::pair<int, const char *> named[] = { { VK_INSERT, "INSERT" }, { VK_HOME, "HOME" }, { VK_END, "END" },
+		{ VK_DELETE, "DELETE" }, { VK_PRIOR, "PAGEUP" }, { VK_NEXT, "PAGEDOWN" }, { VK_PAUSE, "PAUSE" }, { VK_SCROLL, "SCROLLLOCK" },
+		{ VK_TAB, "TAB" }, { VK_BACK, "BACKSPACE" }, { VK_OEM_3, "TILDE" } };
+	for (const auto &[v, n] : named)
+		if (v == vk)
+			return n;
+	return {};
+}
+void key_capture_tick()
+{
+	if (!g_key_capture)
+		return;
+	static bool down[256] = {};
+	static bool primed = false;
+	const auto held = [](int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; };
+	if (!primed) // keys already down when the capture starts (the mouse click, the old key) don't count
+	{
+		for (int vk = 1; vk < 256; ++vk)
+			down[vk] = held(vk);
+		primed = true;
+		return;
+	}
+	for (int vk = 1; vk < 256; ++vk)
+	{
+		const bool now = held(vk), fresh = now && !down[vk];
+		down[vk] = now;
+		if (!fresh || !game_focused())
+			continue;
+		if (vk == VK_ESCAPE)
+		{
+			g_key_capture = false, primed = false;
+			logf("overlay: menu key change cancelled");
+			return;
+		}
+		const std::string n = key_ini_name(vk);
+		if (n.empty())
+			continue; // modifiers, mouse buttons, keys the ini cannot name
+		std::string full;
+		if (held(VK_CONTROL)) full += "Ctrl+";
+		if (held(VK_SHIFT)) full += "Shift+";
+		if (held(VK_MENU)) full += "Alt+";
+		full += n;
+		ini_set(L"ui", L"menu_key", std::wstring(full.begin(), full.end()));
+		load_menu_key();
+		g_key_release_vk = vk;
+		g_key_capture = false, primed = false;
+		logf("overlay: menu key set to %s", g_menu_key.name.c_str());
+		return;
+	}
 }
 
 void load_profile_choices()
@@ -265,9 +335,10 @@ void overlay_panel()
 			}
 			static const char *ph[] = {
 				"Your own settings below.",
-				"The Ghosts play almost purely like the recorded players: human reaction time, no input reading, the players' own guarding, punishing, throw breaks and combos. Note: although Fair aims to stay true to the learned player data, a Ghost may play easier than the real player, simply because there may not be enough recorded data to truly capture their playstyle.",
+				"The Ghosts play almost purely like the recorded players: human reaction time, no input reading, the players' own guarding, punishing, throw breaks and combos. Note: although Basic aims to stay true to the learned player data, a Ghost may play easier than the real player, simply because there may not be enough recorded data to truly capture their playstyle.",
 				"A step up: faster reactions, some input reading, better guarding and punishing, full combos.",
-				"Fast reactions, frequent input reading, perfect guards, strong punishing and full combos.",
+				"Quick reactions, frequent input reading, strong guarding and punishing, full combos.",
+				"Fast reactions, very frequent input reading, perfect guards, strong punishing and full combos.",
 				"Ridiculously difficult: very fast reactions, reads every move, perfect guards, punishes and throw breaks, adapts to you fully." };
 			help(ph[p]);
 		}
@@ -368,7 +439,7 @@ void overlay_panel()
 		auto save_gb = [](const wchar_t *key, int v) { ini_set(L"ghost_battle", key, std::to_wstring(v)); };
 		bool g = c.ghost_battle, rs = c.gb_random_stage, go = c.gb_ghost_opponents;
 		bool sb = c.gb_sp_boss, st = c.gb_sp_turbo, sg = c.gb_sp_heist, s4 = c.gb_sp_double, s6 = c.gb_sp_juggle;
-		bool rp = c.gb_random_player, em = c.gb_end_menu, rn = c.gb_rename, hc = c.gb_hide_chests, nm = c.gb_native_menu;
+		bool rp = c.gb_random_player, em = c.gb_end_menu, rn = c.gb_rename, hc = c.gb_hide_chests, nm = c.gb_native_menu, sk = c.gb_skip_chest_anim;
 		const auto row = [&](const char *label, bool &v, bool &field, const wchar_t *key, const char *text) {
 			if (ImGui::Checkbox(label, &v))
 				field = v, save_gb(key, v);
@@ -408,6 +479,7 @@ void overlay_panel()
 		row("   Native look menu", nm, c.gb_native_menu, L"native_menu", "Show the end-of-match menu inside the game's own result window. Untick to use the overlay menu instead.");
 		row("Call it GHOST BATTLE", rn, c.gb_rename, L"rename", "The main menu calls the mode GHOST BATTLE instead of TREASURE BATTLE.");
 		row("Hide treasure chests", hc, c.gb_hide_chests, L"hide_chests", "No treasure chest icons on the match HUD (the results screen still shows your rewards).");
+		row("Skip treasure chest opening", sk, c.gb_skip_chest_anim, L"skip_chest_opening", "Skips the treasure chest opening animation on the results screen. The windows showing what you unlocked still appear.");
 		row("Random player per ghost", rp, c.gb_random_player, L"random_player", "Tick to make it so every opponent you encounter is only based on ONE ghost profile. Ticking this option makes the opponents you encounter less intelligent overall, but more unique in playstyle (e.g. you may encounter two Paul opponents who play very differently). Recommended is unticked/disabled.");
 		ImGui::TextUnformatted("Special fights (vanilla Treasure Battle encounters):");
 		help("Tick a kind to allow it; unticked kinds become regular fights. All are off by default.");
@@ -471,6 +543,10 @@ void overlay_panel()
 		if (ImGui::Checkbox("No Wall Bound", &nwb))
 			c.mod_no_wall_bound = nwb, save_mod(L"no_wall_bound", nwb);
 		help("Wall bound moves give a normal wall splat instead.");
+		bool gm = wsnd::g_good_morning;
+		if (ImGui::Checkbox("Good Morning", &gm))
+			wsnd::g_good_morning = gm, save_mod(L"good_morning", gm);
+		help("The announcer greets you at the Bandai Namco splash screen.");
 		bool wu = warmup::g_on;
 		if (ImGui::Checkbox("Warmup Animations", &wu))
 			warmup::set_on(wu);
@@ -558,6 +634,33 @@ void overlay_panel()
 		ImGui::Spacing();
 	}
 
+	// Jukebox Infinity built in (v1.4 item 12, author 2026-11-22): one checkbox, applied at the next game start; an
+	// orange line when the standalone is installed as well (which file can go)
+	if (ImGui::CollapsingHeader(("Jukebox Infinity " + jbx::g_version + "###jukebox").c_str()))
+	{
+		bool je = jbx::g_setting;
+		if (ImGui::Checkbox("Enable Jukebox Infinity", &je))
+			jbx::g_setting = je, ini_set(L"jukebox", L"enabled", je ? L"1" : L"0");
+		help("Enables the Jukebox Infinity mod, which allows you to customize music with a Jukebox mode on the main menu. "
+			"Supports custom mp3, wav, and wem files dropped into the Jukebox Songs folder next to your game exe.");
+		if (jbx::g_setting != jbx::g_setting_at_start)
+			ImGui::TextDisabled("takes effect the next time the game starts");
+		if (!jbx::g_standalone.empty())
+		{
+			const std::string other = jbx::utf8(jbx::g_standalone), mine = jbx::utf8(jbx::g_self);
+			const std::string msg = jbx::g_setting
+				? "You have installed two versions of Jukebox Infinity. You can safely delete the standalone Jukebox Infinity " + other +
+					" and use this version included in T7 Ghost AI's " + mine + " instead."
+				: "Even though you have unticked 'Enable Jukebox Infinity', it is still active because you have two versions of Jukebox "
+					"Infinity installed. You can safely delete the standalone version's " + other + " and use T7 Ghost AI's " + mine +
+					" built-in version of Jukebox Infinity instead.";
+			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.6f, 0.2f, 1));
+			ImGui::TextWrapped("%s", msg.c_str());
+			ImGui::PopStyleColor();
+		}
+		ImGui::Spacing();
+	}
+
 	// Testing Hotkeys (author 2026-11-16): the warmup test keys and the pose tools, both off by default
 	if (ImGui::CollapsingHeader("Testing Hotkeys"))
 	{
@@ -569,22 +672,161 @@ void overlay_panel()
 		if (ImGui::Checkbox("Pose tools (F9-F12)", &pt))
 			warmup::set_pose_tools(pt);
 		help("Records every intro and win pose as it plays (t7ghost\\pose_moves.txt). In Practice: F10 / F9 next / previous recorded pose, F11 plays it again, F12 exports the lines of t7ghost\\pose_export.txt as warmup animations (Shift = P2's character). See tools/warmup/POSE_EXPORT.md. Offline battles only.");
-		ImGui::TextDisabled("both off by default");
+		bool sk = wsnd::g_keys;
+		if (ImGui::Checkbox("Warmup sound timing keys (Insert / Delete)", &sk))
+			wsnd::set_keys(sk);
+		help("Places voice lines and sound effects on warmup animations. Select a sound below (Play previews it), start a warmup with the test keys (F5-F8), and press Insert at the moment the sound should play - Shift+Insert for P2's warmup. Delete (Shift+Delete for P2) removes the last sound placed on that warmup. Saved to t7ghost\\warmup\\sounds.txt, where the frame numbers can be fine-tuned. The sounds then play whenever that warmup plays. Offline battles only.");
+		if (wsnd::g_keys)
+		{
+			ImGui::Indent();
+			std::string armed, msg, code[2];
+			std::vector<std::string> lines[2];
+			std::vector<std::string> sfx;
+			{
+				std::lock_guard lk(wsnd::g_mx);
+				armed = wsnd::g_armed, msg = wsnd::g_msg;
+				for (int i = 0; i < 2; ++i)
+				{
+					code[i] = wsnd::g_code_ui[i];
+					if (auto it = wsnd::g_voices.find(code[i]); it != wsnd::g_voices.end())
+						lines[i] = it->second;
+				}
+				sfx = wsnd::g_sfx;
+			}
+			ImGui::Text("Selected: %s", armed.empty() ? "(none)" : armed.c_str());
+			if (!msg.empty())
+				ImGui::TextDisabled("%s", msg.c_str());
+			auto list = [&](const std::vector<std::string> &names, int side, const char *id) {
+				int n = 0;
+				for (const std::string &nm : names)
+				{
+					ImGui::PushID(n++);
+					if (ImGui::SmallButton("Play"))
+					{
+						std::lock_guard lk(wsnd::g_mx);
+						wsnd::g_preview[side] = nm;
+					}
+					ImGui::SameLine();
+					if (ImGui::Selectable(nm.c_str(), nm == armed))
+					{
+						std::lock_guard lk(wsnd::g_mx);
+						wsnd::g_armed = nm;
+					}
+					ImGui::PopID();
+				}
+				(void)id;
+			};
+			if (!wsnd::g_names_ready)
+				ImGui::TextDisabled("reading the sound names...");
+			for (int i = 0; i < 2; ++i)
+			{
+				char title[96];
+				snprintf(title, sizeof title, "P%d voice lines (%s, %zu)###wsndv%d", i + 1, code[i].empty() ? "no fight" : code[i].c_str(), lines[i].size(), i);
+				if (ImGui::TreeNode(title))
+				{
+					if (lines[i].empty())
+						ImGui::TextDisabled(code[i].empty() ? "start a fight (Practice) first" : "no voice lines found for this character");
+					list(lines[i], i, "v");
+					ImGui::TreePop();
+				}
+			}
+			char title[96];
+			snprintf(title, sizeof title, "Battle sound effects (%zu)###wsndsfx", sfx.size());
+			if (ImGui::TreeNode(title))
+			{
+				static char filter[64] = "";
+				ImGui::SetNextItemWidth(220 * sc);
+				ImGui::InputText("filter", filter, sizeof filter);
+				std::vector<std::string> shown;
+				for (const std::string &nm : sfx)
+				{
+					std::string a2 = nm, f2 = filter;
+					for (char &c : a2) c = char(tolower(static_cast<unsigned char>(c)));
+					for (char &c : f2) c = char(tolower(static_cast<unsigned char>(c)));
+					if (f2.empty() || a2.find(f2) != std::string::npos)
+						shown.push_back(nm);
+				}
+				list(shown, 0, "s");
+				ImGui::TreePop();
+			}
+			ImGui::Unindent();
+		}
+		ImGui::TextDisabled("all off by default");
 		ImGui::Spacing();
 	}
 
-	// PLEASE HELP! (author's text, 2026-10-25; counts and list updated 2026-10-26, 2026-11-01): asks players to send play data from the harvesters
+	// Data Volunteering (optional) (author 2026-11-16; LIVE / Replay built in v1.4 item 9, 2026-11-21; renamed and
+	// reordered 2026-11-22: "Data Recorders" from now on, Replay first): one recorder at a time, all off by default.
+	// The Ghost Battle one is dev-build only.
+	if (ImGui::CollapsingHeader("Data Volunteering (optional)"))
+	{
+		const int hm = harvest::g_mode;
+		bool live = hm == harvest::kLive, rep = hm == harvest::kReplay;
+		if (ImGui::Checkbox("Replay Data Recorder", &rep))
+			set_harvest_mode(rep ? harvest::kReplay : harvest::kOff);
+		help("Records the replays you watch in the Battle Log to TEKKEN 7\\TekkenGame\\Binaries\\Win64\\t7GhostReplayData. Please send recorded data to the e-mail address DreamOfCasinoSoul@proton.me to help me improve the Ghost AI. See README_Data_Recorders.txt.");
+		if (rep)
+		{
+			ImGui::Indent();
+			if (harvest::g_pilot_on)
+			{
+				if (ImGui::Button("Stop Replay Data Gathering"))
+					harvest::stop_pilot("F1 button");
+				ImGui::TextColored(ImVec4(0.45f, 0.9f, 0.45f, 1), "gathering - Ctrl+F8 also stops it");
+			}
+			else
+			{
+				if (ImGui::Button("Start Replay Data Gathering"))
+				{
+					harvest::g_pilot_req = true;
+					g_menu_open = false; // the game needs its keys back
+				}
+				help("Open Battle Log > Replays and highlight the FIRST replay you want to record (don't open it), then click this (or press Ctrl+F8 there). It plays the replays one after another by itself - the game may stay in the background meanwhile (minimised is fine too, as long as the game keeps running). Ctrl+F8 or the Stop button stops it. Turn off the replay tips (Recommended Combo / Punishment) first.");
+			}
+			ImGui::Unindent();
+		}
+		if (ImGui::Checkbox("LIVE Match Data Recorder", &live))
+			set_harvest_mode(live ? harvest::kLive : harvest::kOff);
+		help("Records the ONLINE matches you play or spectate (ranked, player match) to TEKKEN 7\\TekkenGame\\Binaries\\Win64\\t7GhostLIVEplayData. Offline fights - against the CPU, Practice, offline VS - are never recorded. Please send recorded data to the e-mail address DreamOfCasinoSoul@proton.me to help me improve the Ghost AI. See README_Data_Recorders.txt.");
+#ifndef T7_PUBLIC
+		bool gr = g_gb_record;
+		if (ImGui::Checkbox("Ghost Battle Mode Data Recorder", &gr))
+			set_gb_record(gr);
+		help("Records every Ghost Battle fight against a Ghost (from Fight! to the K.O. of each round) to t7ghost\\ghostbattle\\gb_<time>.jsonl, labelled with which side was you and which the Ghost - the Ghost's side is never used for any profile. Untick to play Ghost Battle without recording.");
+		if (g_gbr.on)
+			ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.3f, 1), "recording this fight");
+#endif
+		if (harvest::g_recording)
+			ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.3f, 1), "recording (%d file(s) this session)", harvest::g_files.load());
+		else if (hm != harvest::kOff)
+			ImGui::TextDisabled("on - %d file(s) this session", harvest::g_files.load());
+		ImGui::TextDisabled("one recorder at a time, all off by default");
+		// the folders the recordings go to, in Windows Explorer (created if they do not exist yet)
+		auto open_dir = [](const wchar_t *dir) {
+			const std::wstring p = harvest::g_win64 + dir;
+			CreateDirectoryW(p.c_str(), nullptr);
+			ShellExecuteW(nullptr, L"open", p.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+		};
+		if (ImGui::Button("Open Replay Data folder"))
+			open_dir(harvest::kVariants[harvest::kReplay].dir);
+		ImGui::SameLine();
+		if (ImGui::Button("Open LIVE Data folder"))
+			open_dir(harvest::kVariants[harvest::kLive].dir);
+		ImGui::Spacing();
+	}
+
+	// PLEASE HELP! (author's text, 2026-10-25; counts and list updated 2026-10-26, 2026-11-01): asks players to send play data from the Data Recorders
 	if (ImGui::CollapsingHeader("PLEASE HELP!"))
 	{
 		static const char *help_text[] = {
-			"Data for 11 characters is still totally missing!",
+			"Data for 10 characters is still totally missing!",
 			"Data for a further 15 characters is VERY small (only a few minutes of data gathered).",
 			"If we want to keep improving the single player experience of Tekken 7 and make the Ghost AI even more realistic, I will need YOUR help collecting play data that shows how real players use the characters in the game!",
 			"The Ghosts CANNOT WORK if they aren't fed data that teaches them how to play a character.",
 			"PLEASE HELP by gathering play data from real online matches you played (either from your 30 Replays in My Replay & Tips or just by playing real online matches like you normally would) and volunteering it by e-mailing the gathered data to me at DreamOfCasinoSoul@proton.me.",
-			"Data Harvesters for Replay and Live Match data collection have been included in the mod download .zip for this purpose. Read the provided readme instructions to use the Harvesters.",
+			"Data Recorders for Replay and Live Match data collection are built into the mod for this purpose: see Data Volunteering (optional) above. Read README_Data_Recorders.txt (in the mod download .zip) for instructions.",
 			"I CANNOT GATHER ENOUGH DATA ON MY OWN! Finding a match in this game is very hard now! Please help me gather the data needed to improve the Ghost AI further!",
-			"Data for the following missing characters is ESPECIALLY valuable: Kunimitsu, Law, Anna, Geese, Leroy, Fahkumram, Lidia, Master Raven, Nina, Panda, Bob.",
+			"Data for the following missing characters is ESPECIALLY valuable: Kunimitsu, Anna, Geese, Leroy, Fahkumram, Lidia, Master Raven, Nina, Panda, Bob.",
 		};
 		ImGui::PushTextWrapPos(0.0f); // wrap at the window edge
 		for (const char *t : help_text)
@@ -619,12 +861,14 @@ void overlay_panel()
 		c.gb_custom_slot = d.gb_custom_slot, ini_set(L"ghost_battle", L"custom_slot", std::to_wstring(d.gb_custom_slot));
 		gb(L"end_menu", c.gb_end_menu, d.gb_end_menu);
 		gb(L"rename", c.gb_rename, d.gb_rename), gb(L"hide_chests", c.gb_hide_chests, d.gb_hide_chests);
+		gb(L"skip_chest_opening", c.gb_skip_chest_anim, d.gb_skip_chest_anim);
 		gb(L"random_player", c.gb_random_player, d.gb_random_player), gb(L"native_menu", c.gb_native_menu, d.gb_native_menu);
 		c.mod_no_rage = d.mod_no_rage, ini_set(L"modifiers", L"no_rage", std::to_wstring(int(d.mod_no_rage)));
 		c.mod_health = d.mod_health, ini_set(L"modifiers", L"health", std::to_wstring(d.mod_health));
 		c.mod_no_pc = d.mod_no_pc, ini_set(L"modifiers", L"no_power_crush", std::to_wstring(int(d.mod_no_pc)));
 		c.mod_no_screw = d.mod_no_screw, ini_set(L"modifiers", L"no_screw", std::to_wstring(int(d.mod_no_screw)));
 		c.mod_no_wall_bound = d.mod_no_wall_bound, ini_set(L"modifiers", L"no_wall_bound", std::to_wstring(int(d.mod_no_wall_bound)));
+		wsnd::g_good_morning = true, ini_set(L"modifiers", L"good_morning", L"1");
 		c.mod_backdash = d.mod_backdash, ini_set(L"modifiers", L"backdash", std::to_wstring(d.mod_backdash));
 		c.mod_sidestep = d.mod_sidestep, ini_set(L"modifiers", L"sidestep", std::to_wstring(d.mod_sidestep));
 		c.mod_camera = d.mod_camera, ini_set(L"modifiers", L"camera", std::to_wstring(d.mod_camera));
@@ -650,7 +894,14 @@ void overlay_panel()
 			g_ov.forget_armed = GetTickCount64() + 4000;
 	}
 	ImGui::TextDisabled("changes apply instantly and are saved to t7ghost.ini");
-	ImGui::TextDisabled("menu key: %s  (t7ghost.ini [ui] menu_key)", g_menu_key.name.c_str());
+	ImGui::AlignTextToFramePadding();
+	if (g_key_capture)
+		ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.3f, 1), "Menu key: press the new key (Esc cancels)");
+	else
+		ImGui::Text("Menu key: %s", g_menu_key.name.c_str());
+	ImGui::SameLine();
+	if (ImGui::Button(g_key_capture ? "Cancel##menukey" : "Change##menukey"))
+		g_key_capture = !g_key_capture;
 	ImGui::End();
 }
 
@@ -804,7 +1055,17 @@ bool overlay_install()
 void overlay_tick()
 {
 	static ULONGLONG last_toggle = 0;
-	const bool by_state = menu_key_pressed(), by_msg = g_menu_key_msg.exchange(false);
+	key_capture_tick();
+	bool by_state = menu_key_pressed(), by_msg = g_menu_key_msg.exchange(false);
+	if (g_key_capture)
+		by_state = by_msg = false; // binding a key: the old one does not close the menu
+	if (const int vk = g_key_release_vk)
+	{
+		if (GetAsyncKeyState(vk) & 0x8000)
+			by_state = by_msg = false; // the key just bound is still down: it must not close the menu at once
+		else
+			g_key_release_vk = 0;
+	}
 	if ((by_state || by_msg) && GetTickCount64() - last_toggle > 300)
 	{
 		last_toggle = GetTickCount64();

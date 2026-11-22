@@ -9,7 +9,7 @@ defaults below are written (release template).
 import configparser
 import sys
 
-VERSION = "1.3a"  # keep in step with T7_VERSION_STR in src/main.cpp (letter = new ghost data, number = new features)
+VERSION = "1.4a"  # keep in step with T7_VERSION_STR in src/main.cpp (letter = new ghost data, number = new features)
 DOWNLOAD = "https://github.com/NobodyCatchMe-AZ92/T7-Ghost-AI"
 
 # (key, default, explanation)
@@ -17,7 +17,8 @@ AI = [
     ("mod_enabled", "1", '1 = the replay-trained AI replaces the CPU offline: Practice "CPU" dummy at Ultra Hard, Arcade and Treasure Battle (never online)'),
     ("arcade", "1", "1 = also in Arcade Battle (characters without a profile keep the game's CPU)"),
     ("treasure_battle", "1", "1 = also in Treasure Battle (characters without a profile keep the game's CPU)"),
-    ("ai_preset", "3", "Ghost AI Preset: 0 = Custom Settings (the values below), 1 = Fair, 2 = Medium Challenge, 3 = Challenging, 4 = Unfair. A preset overrides the values below (they are kept for Custom Settings)."),
+    ("ai_preset", "3", "Ghost AI Preset: 0 = Custom Settings (the values below), 1 = Basic, 2 = Medium Challenge, 3 = Challenging, 4 = Very Challenging, 5 = Unfair. A preset overrides the values below (they are kept for Custom Settings)."),
+    ("ai_preset_list", "2", "(internal: the preset numbering above - leave it at 2)"),
     ("reaction_frames", "14", "frames before the AI reacts to what you do (60 = 1 second). 13-15 = strong human"),
     ("input_read_chance", "0", '0-100: chance per move that the AI "reads" your move instantly (cheat). 0 = fair'),
     ("punish_proficiency", "50", "0-100: Punishment Proficiency. 0 = the player's own punishers and timing; 1-100 = chance that a punish "
@@ -34,9 +35,10 @@ AI = [
 PROFILES_NOTE = ("; per character id: c21=merged (default: all recorded players as one),\n"
                  "; c21=hybrid (best player's style, other players fill gaps + share punishes/combos), or c21=Katarina-P01 (that player only)")
 UI = [
-    ("menu_key", "F1", "key that opens/closes the in-game settings panel: F1-F12, Insert, Home, End, PageUp, a letter...;\n"
-                       "; modifiers allowed, e.g. Ctrl+F1, Shift+Home"),
+    ("menu_key", "F1", "key that opens/closes the in-game settings panel: F1-F24, Insert, Home, End, Delete, PageUp, PageDown, Pause, a letter, a digit, Numpad0-9...; "
+                       "Ctrl+ / Shift+ / Alt+ in front for a combination (e.g. Ctrl+F1). Also changeable in the menu itself (Menu key: Change, at the bottom);"),
     ("warmup_test_keys", "0", "1 = on, 0 = off (default). Testing Hotkeys: F5 / F6 / F7 / F8 play P1's Round 1 / Down / Up / Final Round warmup (Shift = P2). Offline battles only."),
+    ("warmup_sound_keys", "0", "1 = on, 0 = off (default). Testing Hotkeys: Insert / Shift+Insert place the sound picked in F1 at P1's / P2's current warmup frame (warmup\\sounds.txt), Delete / Shift+Delete remove the last one placed. Offline battles only."),
     ("pose_tools", "0", "1 = on, 0 = off (default). Testing Hotkeys: records intros / win poses (pose_moves.txt); F9 / F10 / F11 preview them, F12 exports pose_export.txt as warmups. Offline battles only."),
 ]
 MODS = [
@@ -44,6 +46,7 @@ MODS = [
     ("no_power_crush", "0", "1 = on, 0 = off. No Power Crush: power crush moves lose their armor. Offline battles only, takes effect immediately."),
     ("no_screw", "0", "1 = on, 0 = off. No Screw: screw moves give a normal juggle hit instead of extending the combo. Offline battles only, takes effect immediately."),
     ("no_wall_bound", "0", "1 = on, 0 = off. No Wall Bound: wall bound moves give a normal wall splat instead of bouncing the opponent off the wall. Offline battles only, takes effect immediately."),
+    ("good_morning", "1", "1 = on, 0 = off. Good Morning: the announcer greets you at the Bandai Namco splash screen when the game starts."),
     ("backdash", "100", "Backdash Distance: how far both players' default backdash (b,b) travels, in percent of normal (1-200). Offline battles only, takes effect immediately."),
     ("sidestep", "100", "Sidestep Distance: how far both players' sidesteps and sidewalks (tap / hold up or down) travel, in percent of normal (1-200). Offline battles only, takes effect immediately."),
     ("camera", "100", "Camera Distance: how far the normal battle camera is from the fighters, in percent of normal (1-200; lower = closer). Rage Arts, heavy-hit zoom-ins and other cinematic shots keep their own framing. Every game mode, online too (only your screen changes); takes effect immediately."),
@@ -76,7 +79,14 @@ GB = [
     ("native_menu", "1", "1 = on, 0 = off. Show the end-of-match menu inside the game's own result window. 0 = the overlay menu instead."),
     ("rename", "1", "1 = on, 0 = off. The main menu calls the mode GHOST BATTLE instead of TREASURE BATTLE."),
     ("hide_chests", "1", "1 = on, 0 = off. No treasure chest icons on the match HUD (the results screen still shows your rewards)."),
+    ("skip_chest_opening", "1", "1 = on, 0 = off. Skips the treasure chest opening animation on the results screen. The windows showing what you unlocked still appear."),
     ("random_player", "0", "1 = on, 0 = off. Tick to make it so every opponent you encounter is only based on ONE ghost profile. Ticking this option makes the opponents you encounter less intelligent overall, but more unique in playstyle (e.g. you may encounter two Paul opponents who play very differently). Recommended is unticked/disabled."),
+]
+JUKEBOX = [
+    ("enabled", "1", "1 = on, 0 = off. Enable Jukebox Infinity: customize the music with a Jukebox mode on the main menu; custom mp3, wav and wem files go into the Jukebox Songs folder next to the game exe (settings: T7Jukebox.ini there). Applies from the next game start."),
+]
+RECORDERS = [
+    ("mode", "0", "Data Recorders (F1 > Data Volunteering): 0 = off (default), 1 = LIVE Match Data Recorder, 2 = Replay Data Recorder. See README_Data_Recorders.txt."),
 ]
 SCAN_NOTE = "; dev tool region: data = exe .data section, state = newest fight-state block"
 
@@ -87,6 +97,8 @@ def main():
     ui_vals = {k: d for k, d, _ in UI}
     gb_vals = {k: d for k, d, _ in GB}
     mod_vals = {k: d for k, d, _ in MODS}
+    jb_vals = {k: d for k, d, _ in JUKEBOX}
+    rec_vals = {k: d for k, d, _ in RECORDERS}
     if "--from" in sys.argv:
         cp = configparser.ConfigParser(inline_comment_prefixes=(";",), strict=False)
         cp.optionxform = str
@@ -123,6 +135,11 @@ def main():
                     mod_vals[k] = cp["modifiers"][k]
             if "warmup_hide_markers" in cp["modifiers"] and "hide_markers" not in cp["modifiers"]:  # old name (until 2026-11-16)
                 mod_vals["hide_markers"] = cp["modifiers"]["warmup_hide_markers"]
+        for sec, table, got in (("jukebox", JUKEBOX, jb_vals), ("harvesters", RECORDERS, rec_vals)):
+            if cp.has_section(sec):
+                for k, _, _ in table:
+                    if k in cp[sec]:
+                        got[k] = cp[sec][k]
         if cp.has_section("profiles"):
             profiles = [f"{k}={v}" for k, v in cp["profiles"].items()]
         if cp.has_section("scan"):
@@ -141,6 +158,12 @@ def main():
     lines += ["", "[modifiers]"]
     for k, _, note in MODS:
         lines += [f"{k}={mod_vals[k]}", f"; {note}", "", ""]
+    lines += ["", "[jukebox]"]
+    for k, _, note in JUKEBOX:
+        lines += [f"{k}={jb_vals[k]}", f"; {note}", "", ""]
+    lines += ["", "[harvesters]"]
+    for k, _, note in RECORDERS:
+        lines += [f"{k}={rec_vals[k]}", f"; {note}", "", ""]
     lines += ["", "[profiles]", PROFILES_NOTE] + profiles + ["", "", "", "[scan]", SCAN_NOTE, f"region={region}", ""]
     with open(out, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines))

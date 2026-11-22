@@ -8,7 +8,7 @@ them from it, and add new recordings to it, without any of the original (private
 - Players are pseudonyms only: `P01`, `P02`, ... A pseudonym groups one person's play across characters and
   matches (e.g. a Kazumi and a Negan that are both `P19` are the same person).
 - No names, name hashes, account ids, regions or other personal information exist in the dataset. The Harvesters
-  store keyed name hashes (secret key: `t7GhostHarvest_private/salt.bin`) in the header rows of a recording; the
+  store keyed name hashes (secret key: `t7GhostDataRecorder_private/salt.bin`, formerly `t7GhostHarvest_private`) in the header rows of a recording; the
   dataset tools replace those rows before anything is written, and refuse a recording with any field outside the
   known gameplay schema (`analysis/dataset.py`).
 - The hash -> pseudonym registry (`registry.json`) and `salt.bin` stay private with whoever records. Without them
@@ -31,6 +31,10 @@ repository keeps its `manifest.tsv` and the zip's checksum in `dataset/`, so a c
 `kind` = `replay` (a saved replay played back) or `live` (an online match played or spectated); `char1/2` are game
 character ids (`analysis/load.py` CHAR_NAMES); `round_ends` = the frame number each round ended on (duplicate
 check); `sha256` = of the uncompressed file.
+`kind` = `ghostbattle`: a real player against the mod's own Ghost AI in Ghost Battle (recorded by the author's dev
+build). The Ghost's side is the reserved pseudonym **P00**: it is the AI, not a player, and nothing of it is used -
+no profile (`build_profiles.py`), none of its attacks in the frame data (`framedata.py`); `Recording.ghost_side` in
+`analysis/load.py` marks it.
 
 The order matters: players are numbered by first appearance, and profiles list their decisions in recording order.
 Always add new batches at the end (`tools/add_recordings.py` does).

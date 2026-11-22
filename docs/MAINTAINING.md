@@ -31,7 +31,7 @@ release's `t7ghost` folder. The dev build is what you use to record; never hand 
      plays the list automatically. Write `self_sides.txt` next to the files: one line `<file stem> p1|p2` per
      replay, the side the recording player had in the original match (default p1).
    - Online: the LIVE Harvester records every match played or spectated -> `Win64\t7GhostLIVEplayData\live_<time>.jsonl`
-     plus `harvest_log.txt`. Write `my_matches.txt` next to the files, one line per match:
+     plus `DataRecorder_log.txt` (`harvest_log.txt` before 2026-11-22). Write `my_matches.txt` next to the files, one line per match:
      `<file> <date> <time> <P1 char> <P2 char> <stage> <you> <left label> <right label>`
      - `you` = `P1` / `P2` (your side), `-` (spectated) or `?`.
      - labels: `.` = unknown player, a letter (`A`, `B`, ...) = the same person within this batch, `@P<n>` = an
@@ -76,12 +76,15 @@ clean the installed copy and ship that: `py -I tools/release/clean_learned.py <i
 2. `build.bat`, then check the public DLL has no dev hotkeys and no personal paths (`tools/release/pii_scan.py`).
 3. Package (one zip, two folders):
    ```
-   T7 Ghost Mod <ver>/  CHANGELOG.md, README.txt (dist/README.txt), THIRD_PARTY_LICENSES.txt,
+   T7 Ghost Mod <ver>/  CHANGELOG.md, README.txt (dist/README.txt), README_Data_Recorders.txt, THIRD_PARTY_LICENSES.txt (dist),
                         Win64/dinput8.dll (build\public), Win64/t7ghost/ {t7ghost.ini (dist), framedata.txt, walls.txt,
                         learned_framedata.txt (cleaned), profiles/*.t7p + index.txt,
                         combos/ routes_*.txt punishes_*.txt taunts_*.txt (no *_candidates.txt),
-                        warmup/ (dist/warmup: the *.bin animations, tuning.txt, camera_shots.txt)}
-   Data Harvesters (for gathering and volunteering your own ghost data)/  the two Harvester DLLs + README
+                        combos/ also walls_*.txt (wall enders),
+                        warmup/ (dist/warmup: the *.bin animations, tuning.txt, camera_shots.txt, sounds.txt)},
+                        Win64/Jukebox Songs/ (its note) and Win64/t7jukebox/Jukebox Background.usm (Jukebox Infinity)
+   The Data Recorders are built into the mod since v1.4a (no separate DLLs). Jukebox Infinity's source is synced from
+   its own project with tools/sync_jukebox.py before building.
    ```
 4. The dataset: zip it (`T7-Ghost-AI-dataset-<version>.zip`: `manifest.tsv`, `recordings/`, `combos/`, `walls/`),
    copy its `manifest.tsv` to the repository's `dataset/` and write the zip's SHA-256 to `dataset/SHA256SUMS`,
@@ -94,6 +97,6 @@ clean the installed copy and ship that: `py -I tools/release/clean_learned.py <i
 
 - No personal information anywhere public: no names, name hashes, account ids, regions, e-mail addresses (other
   than a project contact address), real names or file paths with user names. Players are `P<nn>` only.
-- Never publish or share `salt.bin` (`t7GhostHarvest_private`) or `registry.json`.
+- Never publish or share `salt.bin` (`t7GhostDataRecorder_private`, formerly `t7GhostHarvest_private`) or `registry.json`.
 - The AI and every gameplay modifier are offline only (game mode 2); online play must never be affected. Only
   options that change nothing but your own screen (camera, lifebar HUD) may work online.

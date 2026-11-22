@@ -20,10 +20,15 @@ struct Hit
 	std::string hash;   // first 12 hex digits of HMAC-SHA256(key, bytes)
 };
 
+// Two keys can live in one process since v1.4 (2026-11-21): the mod's own recorder (t7ghost/private) and the built-in
+// Data Recorder (Win64/t7GhostDataRecorder_private - formerly t7GhostHarvest_private, the same key as the standalone
+// recorders, so a player keeps their code).
+// The harvester's thread sets g_harvest_thread and then uses its own key everywhere below.
+inline thread_local bool g_harvest_thread = false;
 inline std::vector<uint8_t> &key()
 {
-	static std::vector<uint8_t> k;
-	return k;
+	static std::vector<uint8_t> k, hk;
+	return g_harvest_thread ? hk : k;
 }
 
 inline bool load_key(const std::wstring &dir)

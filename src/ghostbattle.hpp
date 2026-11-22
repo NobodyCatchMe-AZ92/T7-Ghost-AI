@@ -28,8 +28,9 @@ constexpr uintptr_t kFnInfoFind = 0x3CDA60, kFnInfoSetChar = 0x3CD6A0, kFnInfoSe
 constexpr uintptr_t kFnCostumeSetMode = 0x292CD0; // on cfg +0xB8 + side*0x460: 0 = default costume, 4 = the ghost's own
 constexpr uintptr_t kCfgChar = 0x0C, kCfgStage = 0x14, kCfgRounds = 0xA0, kCfgCostume = 0xB8, kCostumeStride = 0x460, kInfoSide = 0x68;
 
-// every stage of the final build (one id per look; see analysis/stages.py)
-constexpr int kStages[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 30, 31, 32, 33, 35, 36, 37, 39, 40, 41, 51, 52, 55, 56, 57, 58, 59 };
+// every stage of the final build (one id per look; see analysis/stages.py). 53 Jungle Outpost (day) and 54 Twilight
+// Conflict (evening) were missing until 2026-11-20 (author: never seen in Ghost Battle, not in Simple Select)
+constexpr int kStages[] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 30, 31, 32, 33, 35, 36, 37, 39, 40, 41, 51, 52, 53, 54, 55, 56, 57, 58, 59 };
 
 using Fn4 = uintptr_t(__fastcall *)(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 Fn4 g_next_orig = nullptr, g_ghost_orig = nullptr;
@@ -153,13 +154,21 @@ int preset_count(int ch)
 		if (!t7::rd(e, key) || (key & 0xFF) != ch)
 			continue;
 		int n = 0;
+		bool classic[50] = {};
 		for (; n < 50; ++n)
 		{
 			uintptr_t name = 0;
-			char c0 = 0;
-			if (!t7::rd(e + 8 + n * 8, name) || !name || !t7::rd(name, c0) || !c0)
+			char buf[48] = {};
+			if (!t7::rd(e + 8 + n * 8, name) || !name || !t7::safe_copy(buf, name, sizeof buf - 1) || !buf[0])
 				break;
+			// "<chr>_tk<n>": a classic-game costume (King's kin_tk2, Xiaoyu's xia_tk4, Jin's jin_tk4 - always last)
+			const char *t = std::strstr(buf, "_tk");
+			classic[n] = t && t[3] >= '0' && t[3] <= '9' && !t[4];
 		}
+		// the trailing classic costumes are not presets the game offers (author 2026-11-20: Simple Select lists Jin
+		// with 9 presets, not 10; picking his custom costume became "Preset 10" = jin_tk4 and the fight crashed)
+		while (n > 0 && classic[n - 1])
+			--n;
 		return n;
 	}
 	return 0;
@@ -265,6 +274,9 @@ unsigned custom_slots(int ch)
 // Practice - the C++ costume routine 0x40B5D0 builds slot 6 from the outfit data in the settings block; the
 // preset fix (g_preset_side, set in apply for slots 6 and 7+) runs it for the opponent and reports type 0
 // slot: 1-10 that custom slot, 0 the one last picked, -1 a random one of the character's slots
+// which of the player's customizations each fight-settings side wore last (character, slot 1-10; Simple Select pre-fill)
+struct OwnWorn { int ch = -1, slot = 0; };
+OwnWorn g_own_worn[2];
 bool wear_own_costume(uintptr_t cfg, int cs, uintptr_t cpu, int ch, int slot)
 {
 	uint8_t o[0x1AC] = {};
@@ -294,8 +306,85 @@ bool wear_own_costume(uintptr_t cfg, int cs, uintptr_t cpu, int ch, int slot)
 #endif
 	set_costume(cfg, cs, cpu, kSlotOwnCustom);
 	std::memcpy(reinterpret_cast<void *>(cfg + kCfgCostume + cs * kCostumeStride + 0x1B4 + 4), o + 4, sizeof o - 4);
+	if (cs == 0 || cs == 1)
+		g_own_worn[cs] = { ch, slot };
 	logf("gb: char %d wears the player's own custom costume (slot %d)", ch, slot);
 	return true;
+}
+
+// Simple Select ("Choose a specific Opponent and Stage") fills its panels from the fight settings. After a fight in the
+// player's own custom costume a side holds kSlotOwnCustom (6), which its costume list has no entry for: the field showed
+// blank and confirming it crashed the game (author 2026-11-20, Jin / King in custom 1). Before the menu opens such a side
+// goes back to Default 1 (a valid start), and the custom slot it wore is handed to ss_restore_tick: once the menu has
+// built that panel's costume list, it selects the same customization there (the author wants the last costume kept).
+// g_ss_restore[0] = the player's panel, [1] = the CPU's.
+OwnWorn g_ss_restore[2];
+void ss_clean_costumes()
+{
+	g_ss_restore[0] = g_ss_restore[1] = {};
+	const uintptr_t cfg = battle_cfg(), me = player_info(1), cpu = player_info(0);
+	if (!cfg || !me || !cpu)
+		return;
+	int32_t side = 0;
+	t7::rd(me + kInfoSide, side);
+	side = side ? 1 : 0;
+	for (int s = 0; s < 2; ++s)
+	{
+		int32_t slot = -1, ch = -1;
+		if (!t7::rd(cfg + kCfgCostume + s * kCostumeStride + 4, slot) || slot != kSlotOwnCustom)
+			continue;
+		t7::rd(cfg + kCfgChar + s * 4, ch);
+		set_costume(cfg, s, s == side ? me : cpu, kSlot1P);
+		const OwnWorn w = g_own_worn[s];
+		const bool known = w.ch == ch && w.slot >= 1 && w.slot <= 10;
+		if (known)
+			g_ss_restore[s == side ? 0 : 1] = w;
+		logf("gb: Simple Select: side %d (char %d) wore custom slot %d - %s", s, ch, known ? w.slot : 0,
+			known ? "re-selected once the menu lists it" : "unknown, Default 1");
+	}
+}
+// The menu's costume label follows the panel's +0x23C every frame (its left / right handler only writes it, plus the
+// cursor sound exe+0x477050), so writing the index selects the entry. Index of custom slot s = listed - customizations
+// + its rank among them (the list: defaults, the presets shown, then the player's customizations in slot order).
+void ss_restore_tick(uintptr_t ss)
+{
+	static int waited = 0;
+	if (!g_ss_restore[0].slot && !g_ss_restore[1].slot)
+	{
+		waited = 0;
+		return;
+	}
+	for (int p = 0; p < 2; ++p)
+	{
+		OwnWorn &w = g_ss_restore[p];
+		if (!w.slot)
+			continue;
+		const uintptr_t panel = ss + (p ? 0xA00 : 0x688);
+		int32_t ch = -1, listed = 0;
+		t7::rd(panel + 0x25C, ch), t7::rd(panel + 0x248, listed);
+		if (ch != w.ch || listed <= 0)
+		{
+			if (++waited > 600)
+			{
+				logf("gb: Simple Select: panel %d never listed char %d (shows %d) - left as is", p, w.ch, ch);
+				w = {};
+			}
+			continue;
+		}
+		const unsigned m = custom_slots(w.ch);
+		int rank = 0;
+		for (int s = 1; s < w.slot; ++s)
+			rank += (m >> (s - 1)) & 1;
+		const int idx = listed - int(__popcnt(m)) + rank;
+		if ((m >> (w.slot - 1) & 1) && idx >= 0 && idx < listed)
+		{
+			*reinterpret_cast<volatile int32_t *>(panel + 0x23C) = idx;
+			logf("gb: Simple Select: panel %d re-selects char %d custom slot %d (index %d of %d)", p, w.ch, w.slot, idx, listed);
+		}
+		else
+			logf("gb: Simple Select: char %d custom slot %d not in its list (mask 0x%03X, %d listed) - Default 1", w.ch, w.slot, m, listed);
+		w = {};
+	}
 }
 
 // the costume an opponent gets when not wearing a ranked ghost's own outfit (Costumes option): 1 = 1P
@@ -394,9 +483,21 @@ void default_costume(uintptr_t cfg, int cs, uintptr_t cpu, const ghost::Settings
 // Simple Select's "Customized Slots" index -> a costume (2026-11-09; the list is Default 1-4 (1-2 where the
 // character has only two), then the character's presets, then the player's saved customizations in slot order):
 // slot = 0-3, kSlotPreset1 + n, or kSlotOwnCustom with own = the custom slot 1-10
-void ss_costume(int ch, int idx, int &slot, int &own)
+// listed = how many costumes Simple Select's own list holds for that panel (panel +0x248; its left / right wraps on
+// it, exe+0x479F0A): the presets are then exactly what it showed (listed - defaults - the player's customizations)
+void ss_costume(int ch, int idx, int &slot, int &own, int listed = -1)
 {
-	const int defaults = has_default34(ch) ? 4 : 2, presets = preset_count(ch);
+	const int defaults = has_default34(ch) ? 4 : 2;
+	int presets = preset_count(ch);
+	if (listed > 0)
+	{
+		const int customs = __popcnt(custom_slots(ch));
+		const int shown = listed - defaults - customs;
+		if (shown >= 0 && shown != presets)
+			logf("gb: Simple Select lists %d preset(s) for char %d, the table %d - using its count", shown, ch, presets);
+		if (shown >= 0)
+			presets = std::min(shown, preset_count(ch));
+	}
 	own = 0;
 	if (idx < 0)
 		slot = -1;
@@ -1268,6 +1369,55 @@ template <int I> bool __fastcall chest_hook(uintptr_t self, uintptr_t data, uint
 	return true;
 }
 
+// Skip treasure chest opening (v1.4 item 8, 2026-11-20; on by default, Ghost Battle only). The results screen's chest
+// sequence exe+0x53D390 plays the chest movie's opening label, waits 150 frames (+20 per further chest; the wait returns
+// to exe+0x53D74C), plays its closing label, waits 120 frames (-> exe+0x53D76D), removes the movie and only then lets the
+// "what you unlocked" popups come. Its sounds run as their own sequence exe+0x53D7F0 (0.67 s, a sound, 60 frames, one
+// sound per chest 25 frames apart). Found by logging the game's waits (exe+0x5463D0 frames / 0x5463E0 seconds) on the
+// result screen of a chest win vs a loss. Skipping: those two waits last 1 frame and the sound sequence does not start.
+constexpr uintptr_t kWaitFrames = 0x5463D0, kChestSounds = 0x53D7F0, kChestWaitOpen = 0x53D74C, kChestWaitClose = 0x53D76D;
+using WaitFramesFn = void(__fastcall *)(uintptr_t, int);
+WaitFramesFn g_waitf_orig = nullptr;
+using ChestSoundsFn = void(__fastcall *)(uintptr_t, uintptr_t);
+ChestSoundsFn g_chest_sounds_orig = nullptr;
+bool skip_chest_anim()
+{
+	ghost::Brain *b = g_brain;
+	return b && b->cfg.ghost_battle && b->cfg.gb_skip_chest_anim && t7::read_global(t7::kBattleType) == t7::kBattleTreasure;
+}
+void __fastcall waitf_hook(uintptr_t task, int frames)
+{
+	const uintptr_t ret = uintptr_t(_ReturnAddress()) - t7::exe_base();
+	if ((ret == kChestWaitOpen || ret == kChestWaitClose) && frames > 1 && skip_chest_anim())
+	{
+		logf("gb: chest opening skipped (%s, %d frames -> 1)", ret == kChestWaitOpen ? "opening" : "closing", frames);
+		frames = 1;
+	}
+	g_waitf_orig(task, frames);
+}
+void __fastcall chest_sounds_hook(uintptr_t self, uintptr_t task)
+{
+	if (skip_chest_anim())
+		return; // the sequence ends at once: no chest sounds over the popups
+	g_chest_sounds_orig(self, task);
+}
+void install_chest_skip()
+{
+	static const uint8_t wpro[] = { 0x48, 0x8B, 0x49, 0x28, 0x89, 0x51, 0x18, 0x48, 0x83, 0xC1, 0x08, 0xE9 };
+	static const uint8_t spro[] = { 0x40, 0x56, 0x48, 0x83, 0xEC, 0x20, 0x83, 0x79, 0x28, 0x01 };
+	// the two call sites the waits return to (call 0x5463D0 right before each)
+	static const uint8_t c1[] = { 0xE8 }, c2[] = { 0xE8 };
+	const uintptr_t base = t7::exe_base();
+	auto *w = reinterpret_cast<void *>(base + kWaitFrames), *snd = reinterpret_cast<void *>(base + kChestSounds);
+	const bool sites = std::memcmp(reinterpret_cast<void *>(base + kChestWaitOpen - 5), c1, 1) == 0 &&
+		std::memcmp(reinterpret_cast<void *>(base + kChestWaitClose - 5), c2, 1) == 0;
+	const bool ok1 = sites && std::memcmp(w, wpro, sizeof wpro) == 0 &&
+		MH_CreateHook(w, reinterpret_cast<void *>(&waitf_hook), reinterpret_cast<void **>(&g_waitf_orig)) == MH_OK && MH_EnableHook(w) == MH_OK;
+	const bool ok2 = ok1 && std::memcmp(snd, spro, sizeof spro) == 0 &&
+		MH_CreateHook(snd, reinterpret_cast<void *>(&chest_sounds_hook), reinterpret_cast<void **>(&g_chest_sounds_orig)) == MH_OK && MH_EnableHook(snd) == MH_OK;
+	logf("gb: skip treasure chest opening %s / sounds %s", ok1 ? "hooked" : "OFF (unexpected code)", ok2 ? "hooked" : "OFF");
+}
+
 void install_chests()
 {
 	const uintptr_t base = t7::exe_base();
@@ -1323,10 +1473,123 @@ void install_propexec()
 		logf("mods: move property hook failed (No Power Crush keeps the smoke effect)");
 }
 
+// Devil's Pit floor break (v1.4 item 3, 2026-11-20). After each round exe+0x6E9A40(p1, p2) picks the next phase: 6 = the
+// floor-break transition (phase 10, then the bottomless layer), 4 = the usual next round. It takes 6 only when the stage
+// has the gimmick (exe+0x6FCF60() == 7, Devil's Pit), someone is at match point, it has not broken yet (+0xAE4) - and
+// NEITHER fighter is CPU-controlled (+0x1570 == 0, the two jne at exe+0x6E9ADC / 0x6E9AE5). Ghost Battle's Ghost sits in
+// Treasure Battle's CPU slot, so the floor never broke (nor does it in Arcade / Treasure). In Ghost Battle the two CPU
+// checks are skipped for that one call (both jne -> nop), then put back; every other mode runs the original code.
+constexpr uintptr_t kNextRoundFn = 0x6E9A40, kPitCpuJumps[2] = { 0x6E9ADC, 0x6E9AE5 };
+using NextRoundFn = void(__fastcall *)(uintptr_t, uintptr_t);
+NextRoundFn g_next_round_orig = nullptr;
+bool g_pit_jumps_ok = false;
+
+void pit_cpu_checks(bool skip)
+{
+	static const uint8_t orig[2][2] = { { 0x75, 0x43 }, { 0x75, 0x3A } }, nop2[2] = { 0x66, 0x90 };
+	for (int i = 0; i < 2; ++i)
+	{
+		void *code = reinterpret_cast<void *>(t7::exe_base() + kPitCpuJumps[i]);
+		DWORD old = 0;
+		if (VirtualProtect(code, 2, PAGE_EXECUTE_READWRITE, &old))
+		{
+			std::memcpy(code, skip ? nop2 : orig[i], 2);
+			VirtualProtect(code, 2, old, &old);
+		}
+	}
+	FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void *>(t7::exe_base() + kPitCpuJumps[0]), 0x10);
+}
+
+bool pit_gb()
+{
+	ghost::Brain *br = g_brain;
+	return br && br->cfg.ghost_battle && t7::read_global(t7::kBattleType) == t7::kBattleTreasure && t7::read_global(t7::kStageId) == 7;
+}
+
+// The floor breaks once per fight: after it (phase 10 seen) the CPU checks stay - a safety net, the game's own
+// +0xAE4 check normally covers it. Reset when the fight's first round ends.
+bool g_pit_broke = false;
+
+void __fastcall next_round_hook(uintptr_t a, uintptr_t b)
+{
+	if (!g_pit_jumps_ok || !pit_gb())
+		return g_next_round_orig(a, b);
+	if (t7::read_global(0x34CD4E0 + 0x200) <= 1)
+		g_pit_broke = false;
+	if (g_pit_broke)
+		return g_next_round_orig(a, b);
+	pit_cpu_checks(true);
+	g_next_round_orig(a, b);
+	pit_cpu_checks(false);
+	g_pit_broke = t7::read_global(0x34CD4E0 + 0x14) == 10;
+	logf("gb: Devil's Pit round end (wins %d-%d): CPU checks skipped%s", t7::read_global(0x34CD4E0 + 0x20),
+		t7::read_global(0x34CD4E0 + 0x110), g_pit_broke ? " - the floor breaks" : "");
+}
+
+// A skipped floor break: the fighters' drop to the lower floor is cut short (its end sets +0xAE4 / +0xAE0, exe+0x74CECE),
+// so the switch to phase 4 that ends phase 10 catches up: exe+0x6E4490(4) bumps both fighters' +0xAE4 / +0xAE0 on
+// Devil's Pit at match point when +0xAE4 is still 0 (exe+0x6E4A4A) - again only if neither fighter is CPU-controlled
+// (jne at exe+0x6E4A15 / 0x6E4A1E). Ghost Battle skipped it, so the fighters floated at the old floor height and the break
+// came back at every later match point (author 2026-11-20; VS skips fine). Same treatment for that one call.
+constexpr uintptr_t kPhaseFn = 0x6E4490, kSkipCpuJumps[2] = { 0x6E4A15, 0x6E4A1E };
+using PhaseFn = void(__fastcall *)(int);
+PhaseFn g_phase_orig = nullptr;
+bool g_skip_jumps_ok = false;
+
+void skip_cpu_checks(bool skip)
+{
+	static const uint8_t orig[2][2] = { { 0x75, 0x44 }, { 0x75, 0x3B } }, nop2[2] = { 0x66, 0x90 };
+	for (int i = 0; i < 2; ++i)
+	{
+		void *code = reinterpret_cast<void *>(t7::exe_base() + kSkipCpuJumps[i]);
+		DWORD old = 0;
+		if (VirtualProtect(code, 2, PAGE_EXECUTE_READWRITE, &old))
+		{
+			std::memcpy(code, skip ? nop2 : orig[i], 2);
+			VirtualProtect(code, 2, old, &old);
+		}
+	}
+	FlushInstructionCache(GetCurrentProcess(), reinterpret_cast<void *>(t7::exe_base() + kSkipCpuJumps[0]), 0x10);
+}
+
+void __fastcall phase_hook(int phase)
+{
+	if (!(phase == 4 && g_skip_jumps_ok && t7::read_global(0x34CD4E0 + 0x14) == 10 && pit_gb()))
+		return g_phase_orig(phase);
+	skip_cpu_checks(true);
+	g_phase_orig(phase);
+	skip_cpu_checks(false);
+	int ae[2] = {};
+	t7::rd(t7::exe_base() + t7::kLiveP1 + 0xAE4, ae[0]), t7::rd(t7::exe_base() + t7::kLiveP2 + 0xAE4, ae[1]);
+	logf("gb: Devil's Pit floor break ends - fighters on floor %d / %d", ae[0], ae[1]);
+}
+
+void install_pit_break()
+{
+	static const uint8_t pro[] = { 0x48, 0x89, 0x74, 0x24, 0x20, 0x57, 0x48, 0x83, 0xEC, 0x20 };
+	static const uint8_t j0[] = { 0x83, 0xBF, 0x70, 0x15, 0x00, 0x00, 0x00, 0x75, 0x43 }, j1[] = { 0x83, 0xBE, 0x70, 0x15, 0x00, 0x00, 0x00, 0x75, 0x3A };
+	const uintptr_t base = t7::exe_base();
+	auto *f = reinterpret_cast<void *>(base + kNextRoundFn);
+	g_pit_jumps_ok = std::memcmp(reinterpret_cast<void *>(base + kPitCpuJumps[0] - 7), j0, sizeof j0) == 0 &&
+		std::memcmp(reinterpret_cast<void *>(base + kPitCpuJumps[1] - 7), j1, sizeof j1) == 0;
+	const bool ok = g_pit_jumps_ok && std::memcmp(f, pro, sizeof pro) == 0 &&
+		MH_CreateHook(f, reinterpret_cast<void *>(&next_round_hook), reinterpret_cast<void **>(&g_next_round_orig)) == MH_OK && MH_EnableHook(f) == MH_OK;
+	static const uint8_t ph_pro[] = { 0x4C, 0x8B, 0xDC, 0x55, 0x49, 0x8D, 0x6B, 0xE8, 0x48, 0x81, 0xEC, 0x10 };
+	static const uint8_t k0[] = { 0x44, 0x39, 0xBF, 0x70, 0x15, 0x00, 0x00, 0x75, 0x44 }, k1[] = { 0x44, 0x39, 0xBE, 0x70, 0x15, 0x00, 0x00, 0x75, 0x3B };
+	auto *ph = reinterpret_cast<void *>(base + kPhaseFn);
+	g_skip_jumps_ok = std::memcmp(reinterpret_cast<void *>(base + kSkipCpuJumps[0] - 7), k0, sizeof k0) == 0 &&
+		std::memcmp(reinterpret_cast<void *>(base + kSkipCpuJumps[1] - 7), k1, sizeof k1) == 0;
+	const bool ok2 = ok && g_skip_jumps_ok && std::memcmp(ph, ph_pro, sizeof ph_pro) == 0 &&
+		MH_CreateHook(ph, reinterpret_cast<void *>(&phase_hook), reinterpret_cast<void **>(&g_phase_orig)) == MH_OK && MH_EnableHook(ph) == MH_OK;
+	logf("gb: Devil's Pit floor break in Ghost Battle %s, skip catch-up %s", ok ? "on" : "OFF (unexpected code)", ok2 ? "on" : "OFF");
+}
+
 bool install()
 {
 	const uintptr_t base = t7::exe_base();
 	install_chests();
+	install_chest_skip();
+	install_pit_break();
 	install_preset_fix();
 	install_propexec();
 #ifndef T7_PUBLIC
