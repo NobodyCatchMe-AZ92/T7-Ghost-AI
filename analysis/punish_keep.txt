@@ -34,3 +34,4 @@ Alisa low_block 15 1565,1564 strict  # short range like her standing uf+4,4; oth
 Marduk low_block 15 1678 nolaunch   # ws4 on -13 lows: knocks down, nothing combos after it - not a launch (author, 2026-10-26)
 ArmorKing block 15 1516 strict=1800       # uf+4 whiffs after far pushback: only from 1.80 or closer; otherwise f+2,1 (author, 2026-10-26)
 ArmorKing low_block 15 1516 strict=1800   # uf+4 after a low: the same 1.80 limit; otherwise 4
+Law block 15 1621,1623,1624         # 3+4,4 launch on -14 (author: his 14f launching punish; 3 attempts split over two groups, 2026-11-22)

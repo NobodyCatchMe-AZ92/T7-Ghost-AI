@@ -245,20 +245,26 @@ def main(args):
 
 def manual_keep():
     """(character, launcher, route) the author asked to keep anyway: analysis/combo_keep.txt. A 4th word
-    "latest" also makes the route play the author's last attempt (the earlier ones were warm-ups)."""
+    "latest" also makes the route play the author's last attempt (the earlier ones were warm-ups). A leading
+    '-' on the character drops that route even with --all (2026-11-22: attempts the author discarded)."""
     out, latest = set(), set()
+    global MANUAL_DROP
     path = Path(__file__).with_name("combo_keep.txt")
     if path.exists():
         for line in path.read_text(encoding="utf-8").splitlines():
             parts = line.split("#")[0].split()
             if len(parts) in (3, 4):
-                k = (parts[0], int(parts[1]), tuple(int(x) for x in parts[2].split(",")))
+                k = (parts[0].lstrip("-"), int(parts[1]), tuple(int(x) for x in parts[2].split(",")))
+                if parts[0].startswith("-"):
+                    MANUAL_DROP.add(k)
+                    continue
                 out.add(k)
                 if len(parts) == 4 and parts[3] == "latest":
                     latest.add(k)
     return out, latest
 
 
+MANUAL_DROP = set()
 MANUAL_KEEP, MANUAL_LATEST = manual_keep()
 STUN_STARTS = False  # --stun: combos may also start from a crumple-type stun
 HP_HITS = False  # --hp-hits: a health-bar drop with an unchanged damage value is a hit too (2026-10-21);
@@ -305,7 +311,9 @@ def report(allc, out_dir):
             print()
             print(title)
             lines += ["", title]
-        keep = ((len(g) >= KEEP_MIN or KEEP_ALL) and not dropped(g, groups)) or (name, best["launcher"], best["route"]) in MANUAL_KEEP
+        ident = (name, best["launcher"], best["route"])
+        keep = ((((len(g) >= KEEP_MIN or KEEP_ALL) and not dropped(g, groups)) or ident in MANUAL_KEEP)
+                and ident not in MANUAL_DROP)
         tag = "KEEP" if keep else ("cut " if len(g) >= KEEP_MIN else "    ")
         row = (f"{tag} R{r:<3} x{len(g)}  {best['hits']} hits  {best['damage']} dmg   "
                + ", ".join(x for x in best["notation"] if x) + f"   (attempt #{best['n']})")

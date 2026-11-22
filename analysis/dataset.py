@@ -28,7 +28,7 @@ COLUMNS = ["seq", "file", "kind", "batch", "date", "char1", "char2", "player1", 
 HEADER_KEYS = ("stage", "mode", "variant", "build")  # the only header fields a dataset recording keeps
 
 # every field a frame row may hold; the anonymiser refuses anything else (a new field must be checked first)
-ROW_KEYS = {"f", "p1", "p2", "reset", "from", "to"}
+ROW_KEYS = {"f", "p1", "p2", "reset", "from", "to", "wall", "screw"}  # wall / screw: combo lab rows since v1.4a (wall enders)
 SIDE_KEYS = {"char", "move_timer", "attack_damage", "attack_type", "move_id", "damage_taken", "recovery",
              "hit_outcome", "simple_state", "stun", "throw_tech", "complex_state", "power_crush", "jump_flags",
              "cancel_window", "rage", "rage_fx", "rage_d8", "rage_dc", "rage_e4", "rage_e8", "input_dir", "raw_held",

@@ -32,9 +32,12 @@ def first(frames, start, pred, limit=120):
     return None
 
 
-def measure_round(frames, acc):
+def measure_round(frames, acc, skip=None):
+    """skip = 'p1' / 'p2': a side whose attacks are not measured (the Ghost AI's side of a Ghost Battle recording)"""
     n = len(frames)
     for att, dfn in (("p1", "p2"), ("p2", "p1")):
+        if att == skip:
+            continue
         prev_out = 0
         for i in range(1, n):
             d = frames[i][dfn]
@@ -86,8 +89,9 @@ def build(recordings):
     acc = collections.defaultdict(lambda: {"startup": [], "level": [], "damage": [], "block": [], "hit": [],
                                            "hits": 0, "launches": 0, "dist": [], "sdist": []})
     for rec in recordings:
+        gs = rec.ghost_side  # Ghost Battle recordings: the Ghost's own attacks are left out
         for r in rec.rounds:
-            measure_round(r.frames, acc)
+            measure_round(r.frames, acc, None if gs is None else ("p1", "p2")[gs])
     table = {}
     for (ch, mv), r in acc.items():
         if not r["startup"]:

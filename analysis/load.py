@@ -49,6 +49,20 @@ class Recording:
         return None
 
     @property
+    def ghost_side(self):
+        """Index (0 = p1, 1 = p2) of a side the Ghost AI played (Ghost Battle recordings of the dev build, gb_*.jsonl,
+        header {"ghost_battle": {"human": "p1", "ghost": "p2", ...}}; in the dataset that side is the reserved
+        pseudonym P00). Nothing of that side may feed a profile or the frame data. None = two real players."""
+        for p in self.probes:
+            gb = p.get("ghost_battle")
+            if isinstance(gb, dict) and gb.get("ghost") in ("p1", "p2"):
+                return 0 if gb["ghost"] == "p1" else 1
+            players = p.get("players")
+            if isinstance(players, list) and "P00" in players:
+                return players.index("P00")
+        return None
+
+    @property
     def chars(self):
         r = self.rounds[0].frames[0]
         return int(r["p1"]["char"]), int(r["p2"]["char"])
@@ -65,7 +79,7 @@ def load(path, min_round_frames=120):
                 row = json.loads(line)
             except json.JSONDecodeError:  # half-written last line (file still recording / cut off)
                 continue
-            if "names_probe" in row or "dataset" in row:  # header rows (a dataset recording has one, no hashes)
+            if "names_probe" in row or "dataset" in row or "ghost_battle" in row:  # header rows (dataset / Ghost Battle: no hashes)
                 probes.append(row)
                 continue
             if row.get("reset"):
@@ -149,8 +163,9 @@ def is_practice(rec):
 def load_dir(d):
     out = []
     # rep_* = replay recordings (dev build / replay harvester), live_* = live harvester; contributor
-    # folders may be nested (one subfolder per contributor)
-    for p in sorted(find(d, "rep_*.jsonl", True) + find(d, "live_*.jsonl", True), key=logical):
+    # folders may be nested (one subfolder per contributor); gb_* = Ghost Battle fights of the dev build (the Ghost's
+    # side is never used - Recording.ghost_side)
+    for p in sorted(find(d, "rep_*.jsonl", True) + find(d, "live_*.jsonl", True) + find(d, "gb_*.jsonl", True), key=logical):
         try:
             rec = load(p)
         except PermissionError:  # still being recorded

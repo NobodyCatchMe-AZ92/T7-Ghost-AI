@@ -113,6 +113,8 @@ PLACEHOLDER_CHARS = 4  # a name hash seen with this many different characters is
 
 def opponent_hash(rec):
     from identity import slots_of
+    if rec.ghost_side is not None:  # Ghost Battle recordings carry no name probe (and the opponent is the Ghost AI)
+        return None
     return slots_of(rec).get(OPPONENT_SLOT, (0, None))[1] if rec.probes else None
 
 
@@ -165,7 +167,13 @@ _PLACEHOLDERS = set()
 def player_ids(rec):
     """('self', opponent hash) in slot order. Unknown or placeholder opponent hash -> None.
     Live matches: 'self' only on the side the player ticked; everyone else stays anonymous (live
-    name codes are not used to identify or group anyone)."""
+    name codes are not used to identify or group anyone).
+    Ghost Battle recordings (gb_*.jsonl, dev build): the human side is 'self', the Ghost's side is 'ghost' -
+    never a player, never a profile (author 2026-11-16)."""
+    if rec.ghost_side is not None:
+        ids = [None, None]
+        ids[rec.ghost_side], ids[1 - rec.ghost_side] = "ghost", "self"
+        return tuple(ids)
     if rec.path.name.startswith("live_"):
         # sides the player tagged as the same person share an id (the tag only groups; profiles
         # get numbered pseudonyms); untagged sides stay anonymous, one per match
@@ -220,6 +228,8 @@ def main(rep_dirs, out_dir):
         for si, side in enumerate(("p1", "p2")):
             cid = rec.chars[si]
             pid = ids[si]
+            if pid == "ghost":  # the Ghost AI's side of a Ghost Battle recording: never a profile
+                continue
             if pid is None:
                 anon += 1
                 pid = f"anon{anon}"
@@ -317,13 +327,13 @@ def labelled(rep_dirs):
                 anon += 1
                 ids[si] = f"anon{anon}"
         pids.append(ids)
-    # numbering exactly as main(): first appearance of a (player, character) group
+    # numbering exactly as main(): first appearance of a (player, character) group; a Ghost's side is P00
     player_no = {"self": 1}
     seen = set()
     for rec, ids in zip(recs, pids):
         for si in (0, 1):
             key = (ids[si], rec.chars[si])
-            if key in seen:
+            if key in seen or ids[si] == "ghost":
                 continue
             seen.add(key)
             if ids[si] not in player_no and not ids[si].startswith("ref:"):
@@ -333,7 +343,7 @@ def labelled(rep_dirs):
     for rec, ids in zip(recs, pids):
         ns = []
         for pid in ids:
-            n = int(pid[4:]) if pid.startswith("ref:") else player_no[pid]
+            n = 0 if pid == "ghost" else int(pid[4:]) if pid.startswith("ref:") else player_no[pid]
             ns.append(same.get(n, n))
         out.append((rec, tuple(ns)))
     return out
@@ -350,6 +360,8 @@ def build_from_labels(items, out_dir):
     merged = collections.OrderedDict()
     for rec, ns in items:
         for si, side in enumerate(("p1", "p2")):
+            if ns[si] == 0 or si == rec.ghost_side:  # P00 = the Ghost AI's side (Ghost Battle recordings): never a profile
+                continue
             n = same.get(ns[si], ns[si])
             merged.setdefault((n, rec.chars[si]), []).append((rec, side))
     index = []
