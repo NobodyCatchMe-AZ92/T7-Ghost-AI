@@ -1,0 +1,202 @@
+# Warmup animation tuning. Installed as Win64\t7ghost\warmup\tuning.txt; Ctrl+F9 rereads it.
+# <Character>[_<Round1|Up|Down|Final>]  blend=<frames>  cut=<frames>  cutstart=<frames>  pin=1
+#   blend = how many final frames ease into the idle pose (default 24 = 0.4 s at 60 fps)
+#   cut   = frames dropped from the end first, then the blend runs on the new end
+#           (default 20 for everyone, 30 for Jin - built into the mod; cut=0 = the whole animation)
+#   cutstart = frames dropped from the START (body and hands); 30 frames always stay
+#   pin      = 1 keeps the fighter on its spot: no sideways / forward body movement (height, crouches and
+#              hops stay); pin=0 lets it move again
+#   travel   = <percent>: how far the fighter moves sideways / forward, measured from its own spot (where
+#              pin keeps it): 100 = as the animation does (default), 50 = half as far, 0 = like pin=1, up to 200.
+#              The path keeps its shape and still ends where the animation ends; pin=1 wins over travel
+# A line for one animation wins over the character's line, and any line wins over the defaults.
+# Several lines for one name add up (e.g. one line blend=, another cut=).
+# Borrowed animations (batch.py COPIES) use the borrowing character's name: Julia_Down, Katarina_Round1, ...
+# Names as the animation files: LuckyChloe, Kazumi, MasterRaven, DevilJin, Jack7, ArmorKing, ...
+Jin blend=24   # author 2026-11-15: back to the normal 0.4 s (was 48)
+MasterRaven blend=30
+MasterRaven cut=30
+
+Kazumi_Round1 blend=80
+
+Kazumi_Down blend=50
+
+LuckyChloe_Round1 cut=38
+
+Katarina_Round1 cut=50
+Katarina_Round1 blend=40
+
+
+Katarina_Down cut=50
+Katarina_Down blend=50
+
+
+Julia_Down cut=20
+Julia_Down blend=40
+
+Julia_Final blend=30
+Julia_Final cut=0
+
+Julia_Up blend=60
+Julia_Up cut=10
+
+
+Josie_Down cut=24
+Josie_Down blend=22
+# Lifebar fade-in (Warmup Cinematic Angles): frames of "Round N ... Fight!" at 60 fps - LifebarFade = round 1,
+# LifebarFadeRounds = every other round (one shared timing). The lifebars are
+# invisible until frame <start> and fully visible from frame <end> (linear in between). Ctrl+F9 rereads it.
+LifebarFade start=45 end=80   # author 2026-11-15 (also the built-in default)
+LifebarFadeRounds start=25 end=40   # rounds 2+ (author 2026-11-16; also the built-in default)
+# More screen elements fading with the lifebars: LifebarFadeExtra <movie>:<clip> (several allowed). Movies:
+# SW_UI_HUD_Assist, SW_UI_HUD_ControlGuide, SW_UI_HUD (e.g. SW_UI_HUD:_root - but that includes the faded top part).
+# (the P1 / P2 / YOU / CPU markers are not Flash - they fade with the lifebars automatically since 2026-11-16)
+
+
+Julia pin=1
+Miguel pin=1
+Marduk pin=1
+Josie pin=1
+
+Miguel_Round1 cutstart=35
+Miguel_Round1 blend=60
+Miguel_Round1 cut=25
+
+
+Miguel_Down cutstart=60
+Miguel_Down cut=30
+Miguel_Down blend=50
+
+Miguel_Final blend=52
+Miguel_Final cut=0
+
+Marduk_Round1 cutstart=25
+Marduk_Round1 cut=10
+Marduk_Round1 blend=40
+
+Marduk_Final cutstart=95
+Marduk_Final cut=0
+
+Marduk_Up cut=0
+Marduk_Up blend=40
+
+Josie_Up blend=40
+
+Katarina_Up cutstart=85
+Katarina_Up cut=30
+Katarina_Up blend=45
+
+Katarina_Final cutstart=120
+Katarina_Final travel=50
+
+Josie_Round1 pin=1
+Josie_Round1 cutstart=95
+Josie_Round1 blend=40
+
+Josie_Final cut=150
+Josie_Final blend=37
+
+Gigas_Round1 blend=50
+Gigas_Round1 cutstart=160
+
+Gigas_Down cutstart=0
+Gigas_Down cut=120
+Gigas_Down blend=40
+
+
+Gigas_Final cutstart=120
+Gigas_Final cut=0
+Gigas_Final blend=55
+
+Lei_Round1 cutstart=30
+Lei_Round1 blend=20
+Lei_Round1 cut=130
+
+Lei_Final cut=126
+Lei_Final blend=40
+
+
+
+
+
+Ganryu_Round1 cut=65
+Ganryu_Round1 blend=60
+Ganryu_Round1 travel=75
+
+
+
+Ganryu_Final cutstart=195
+Ganryu_Final blend=35
+
+
+Claudio_Final cut=0
+
+Negan_Round1 cutstart=120
+Negan_Round1 cut=160
+Negan_Round1 blend=100
+
+Negan_Final cutstart=30
+Negan_Final cut=270
+Negan_Final blend=60
+Negan_Final travel=75
+
+Noctis_Round1 cut=110
+Noctis_Round1 blend=60
+Negan_Round1 travel=75
+
+
+
+Akuma_Round1 cutstart=30
+Akuma_Round1 cut=110
+Akuma_Round1 blend=60
+
+Akuma_Down pin=1
+Akuma_Down cutstart=130
+Akuma_Down blend=30
+
+
+Akuma_Final cutstart=160
+Akuma_Final pin=1
+Akuma_Final blend=40
+Akuma_Final cut=0
+
+
+Eliza_Round1 pin=1
+Eliza_Round1 cut=0
+Eliza_Round1 cutstart=140
+Eliza_Round1 blend=45
+
+
+Eliza_Up cut=20
+Eliza_Up blend=80
+
+
+Eliza_Final cutstart=30
+Eliza_Final cut=174
+Eliza_Final blend=40
+
+
+
+Geese_Round1 cutstart=30
+Geese_Round1 cut=170
+Geese_Round1 blend=90
+Geese_Round1 pin=1
+
+
+Geese_Up cutstart=30
+Geese_Up cut=100
+Geese_Up blend=60
+
+Geese_Final cutstart=240
+Geese_Final cut=0
+Geese_Final blend=35
+
+
+Lidia_Round1 travel=75
+
+
+# Hand reach (converter setting for tools/warmup/convert_native.py, not read by the game - re-convert after changing it):
+# <Name>_<Sit>_HandIK until=<frame> fade=<frames> amount=<%> up=<cm> forward=<cm> spread=<cm> [target=<bone>]
+#   hands pulled to the target bone (default L_Foot = left ankle) at full strength until frame (until - fade),
+#   fading out by frame `until`; up / forward / spread = where they touch (cm), spread = distance between the hands
+Julia_Final_HandIK until=65 fade=20 amount=40 up=-10 forward=-15 spread=-20
