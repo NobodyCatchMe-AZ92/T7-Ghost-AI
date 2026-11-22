@@ -30,24 +30,26 @@ Your data is anonymized - players are identified only by a code, never by a user
 default the mod merges all collected data for a character, no matter the player, into one big
 character profile.
 
-Data for the following missing characters is ESPECIALLY valuable: Kunimitsu, Law, Anna, Geese, Leroy,
+Data for the following missing characters is ESPECIALLY valuable: Kunimitsu, Anna, Geese, Leroy,
 Fahkumram, Lidia, Master Raven, Nina, Panda, Bob.
 
 There are two ways you can help me collect data:
 
-#### Data Collection Method 1: Replay Harvester
-Install the Replay Harvester DLL into your game and watch your saved replays. Press *Ctrl+F8* on the
-Battle Log with your first replay highlighted, and the harvester navigates the replay menu by itself
-and plays one replay after another (so you can walk away and grab a coffee while it runs; press
-*Ctrl+F8* again to stop it). Turn off the in-replay tips ("Recommended Combo" / "Recommended
-Punishment") first - they pause the replays. Harvested data goes into a folder next to your game exe
-called "t7GhostReplayData", which you then send to me.
+#### Data Collection Method 1: Replay Data Recorder
+Built into the mod since v1.4a: press F1 > Data Volunteering (optional) and tick "Replay Data Recorder",
+then watch your saved replays. With your first replay highlighted in the Battle Log, click "Start Replay
+Data Gathering" (or press *Ctrl+F8*) and it plays one replay after another by itself - the game can even
+stay in the background (so you can walk away and grab a coffee while it runs; *Ctrl+F8* or the Stop
+button stops it). Turn off the in-replay tips ("Recommended Combo" / "Recommended Punishment") first -
+they pause the replays. The data goes into a folder next to your game exe called "t7GhostReplayData"
+("Open Replay Data folder" in F1), which you then send to me.
 
-#### Data Collection Method 2: Live Harvester
-Install the LIVE Harvester DLL into your game and play or spectate online matches like you normally
-would. Harvested data goes into a folder next to your game exe called "t7GhostLIVEplayData", which you
-then send to me. Only human players help the Ghosts: online matches, spectating, and offline matches
-between two people are great - please **don't** send offline fights against the CPU.
+#### Data Collection Method 2: LIVE Match Data Recorder
+Tick "LIVE Match Data Recorder" in the same F1 section and play or spectate online matches like you
+normally would. The data goes into a folder next to your game exe called "t7GhostLIVEplayData" ("Open
+LIVE Data folder" in F1), which you then send to me. Only online matches are ever recorded - fights
+against the CPU and other offline fights never are. README_Data_Recorders.txt in the download explains
+everything, including the e-mail address to send the data to.
 
 I did look into having people send me their Tekken 7 replay save files instead, but loading another
 account's replay saves corrupts the save data, and reading those files directly wouldn't help anyway:
@@ -58,26 +60,21 @@ observed by playing the replay back in-game.
 ## DOWNLOADING AND INSTALLING
 Available for download (see Releases):
 
-One zip with two folders - pick one:
+**T7 Ghost Mod 1.4a** - the Ghost AI with every Ghost (41 characters), with Jukebox Infinity and the
+Data Recorders built in. Drop the contents of its `Win64` folder into `TEKKEN 7\TekkenGame\Binaries\Win64`
+(next to the game exe), then play Ghost Battle (the reworked Treasure Battle), Arcade Battle, or Practice
+with the opponent set to "CPU" on "Ultra Hard". Press F1 to tune the Ghosts in real time. Its README.txt
+explains everything; CHANGELOG.md lists what changed. Updating from an older version: the mod file is now
+`dinput8.dll` - delete the old `version.dll` from the Win64 folder. The separate Data Harvester DLLs are
+no longer needed (the Data Recorders are in F1 > Data Volunteering).
 
-**T7 Ghost Mod 1.3a** - the Ghost AI with every Ghost (40 characters). Drop the contents of its `Win64`
-folder into `TEKKEN 7\TekkenGame\Binaries\Win64` (next to the game exe), then play Ghost Battle (the
-reworked Treasure Battle), Arcade Battle, or Practice with the opponent set to "CPU" on "Ultra Hard".
-Press F1 to tune the Ghosts in real time. Its README.txt explains everything; CHANGELOG.md lists what
-changed. Updating from an older version: the mod file is now `dinput8.dll` - delete the old
-`version.dll` from the Win64 folder.
-
-**Data Harvesters (for gathering and volunteering your own ghost data)** - if you want to help populate
-the character data: put a harvester's `dinput8.dll` next to your game exe, then send me the Ghost Data
-folders it creates (t7GhostLIVEplayData and t7GhostReplayData). Use the Replay Harvester while you watch
-your saved replays, and the Live Harvester while you play or spectate online matches. Its README.txt
-explains everything.
+**T7-Ghost-AI-dataset-v1.4a.zip** - the open Ghost dataset (see below).
 
 ### Please send all volunteered Ghost Data to the email address: DreamOfCasinoSoul@proton.me
 
 OR upload to mediafire and send the link in this mod page's comments.
 
-**NEVER send the folder "t7GhostHarvest_private".** It holds the secret key that turns player names
+**NEVER send the folder "t7GhostDataRecorder_private"** (called "t7GhostHarvest_private" before v1.4a). It holds the secret key that turns player names
 into the anonymous codes in your data - with that key, someone could check guessed names against the
 codes. The data folders themselves contain only gameplay (moves, positions, health, inputs) with
 players as codes: nothing about you, your PC or your Steam account.
@@ -94,7 +91,7 @@ Thank you!
 ## How it works (short)
 
 1. **Recording.** A `dinput8.dll` proxy loaded by the game reads the game's per-frame fight state while
-   replays play back (or while you play online, with the Live Harvester) and writes it to text files:
+   replays play back (or while you play online, with the LIVE Match Data Recorder) and writes it to text files:
    moves, frame data, stun, positions, health, inputs. It only reads memory.
 2. **Profiles.** The Python pipeline in `analysis/` cuts each player's play into decisions - what they
    did in which situation, at which distance and frame advantage, with how much life and rage - and
@@ -129,6 +126,24 @@ needed to carry it on is here: [docs/MAINTAINING.md](docs/MAINTAINING.md) (how t
 
 ## What's new
 The full list of changes in every version is in [CHANGELOG.md](CHANGELOG.md).
+
+### What's new in v1.4a
+- **Wall combos**: every Ghost finishes wall splats with a recorded wall combo; combos that reach the wall carry you
+  into it with jabs; a screw near the wall goes straight into the wall combo (dashing in first when too far away).
+- **Warmup sounds**: the fighters' own voice lines and sound effects during the warmup animations
+  (`dist/warmup/sounds.txt`).
+- **Jukebox Infinity v1.1 built in** (F1 > Jukebox Infinity, on by default): customize the music with a Jukebox mode
+  on the main menu, custom mp3 / wav / wem files from the `Jukebox Songs` folder. Same folders and settings as the
+  standalone Jukebox Infinity; its source is in `jukebox/`.
+- **Good Morning** (F1 > Game Modifiers): the announcer greets you at the Bandai Namco splash screen.
+- **Data Recorders built in** (F1 > Data Volunteering): the Replay and LIVE Match Data Recorders, with automatic replay
+  gathering (also in the background) and buttons that open the recordings' folders.
+- **Ghost AI Presets**: Basic (was Fair), Medium Challenge, Challenging (new default), Very Challenging (the old
+  Challenging), Unfair. **Skip treasure chest opening** in Ghost Battle. **Menu key** changeable in the panel.
+- **Law gets a Ghost** with recorded punishes and 18 combo routes; more Ghost data for Zafina (581 combo routes,
+  2719 moves of frame data).
+- Devil's Pit breaks at match point in Ghost Battle; Jungle Outpost (day) and Twilight Conflict (evening) are in Ghost
+  Battle; fixed a custom-costume crash in Choose a specific Opponent and Stage and Ghosts moving after a K.O.
 
 ### What's new in v1.3a
 - **Warmup Animations** (F1 > Game Modifiers, on by default, offline): at the start of certain rounds the fighters
@@ -277,17 +292,20 @@ The full list of changes in every version is in [CHANGELOG.md](CHANGELOG.md).
 | `tools/warmup/`, `dist/warmup/` | warmup converters (Blender) and the pose export guide; the warmup animations, `tuning.txt`, `camera_shots.txt` |
 | `src/gbtext.hpp` | the GHOST BATTLE name on the main menu |
 | `src/menutrace.hpp` | dev-build recon tools for the game's Scaleform menus |
-| `src/harvest.cpp` | the shareable read-only harvesters (replay / live) |
+| `src/harvest.hpp` | the Data Recorders (Replay / LIVE Match), read-only |
+| `src/brain.hpp` (wall combos), `analysis/wall_enders.py` | wall enders: from Practice demonstrations to `walls_<char>.txt` |
+| `src/warmup_sound.hpp` | warmup sounds and Good Morning (the game's own voice lines / sound effects) |
+| `src/jukebox_embed.hpp`, `jukebox/` | Jukebox Infinity built in: its own source (synced by `tools/sync_jukebox.py`) and dr_libs |
 | `src/t7.hpp`, `src/names.hpp` | Tekken 7 memory layout; player-name pseudonymisation |
 | `analysis/` | Python: load recordings (replay and live) or the dataset, build profiles, frame data and wall maps; combo routes and punishes from Practice demonstrations |
 | `tools/` | dataset intake (`add_recordings.py`), ini writer, wall-survey checker, replay auto-pilot, memory peek/sampler helpers; `tools/release/` learned-frame-data cleaner and privacy scan |
 | `docs/` | `TECHNICAL.md` (how everything works), `DATASET.md` (the open data), `MAINTAINING.md` (carrying the project on) |
 | `dataset/` | the dataset's manifest and checksums (the recordings themselves are a release download) |
 | `dist/t7ghost.ini`, `dist/walls.txt`, `dist/learned_framedata.txt` | default settings, the stage wall maps and the learned punish windows shipped with releases |
-| `dist/README.txt`, `dist/README_harvesters.txt` | the readmes inside the download |
-| `dist/combos/` | the recorded combo routes (`routes_<char>.txt`), punishes (`punishes_<char>.txt`) and taunts (`taunts_<char>.txt`) |
+| `dist/README.txt`, `dist/README_Data_Recorders.txt`, `dist/THIRD_PARTY_LICENSES.txt` | the readmes and licences inside the download |
+| `dist/combos/` | the recorded combo routes (`routes_<char>.txt`), punishes (`punishes_<char>.txt`), taunts (`taunts_<char>.txt`) and wall enders (`walls_<char>.txt`) |
 | `CHANGELOG.md` | what changed in each version |
-| `third_party/` | MinHook (BSD-2), Dear ImGui (MIT) |
+| `third_party/`, `jukebox/third_party/` | MinHook (BSD-2), Dear ImGui (MIT), dr_libs (public domain / MIT-0) |
 
 ## Building
 
@@ -314,7 +332,7 @@ py -I tools/add_recordings.py    <dataset> <new recordings folder> --registry <y
 
 No player names are ever stored. Name-like strings are hashed in-process with a random key that never
 leaves the recording PC; the public dataset and the profiles use pseudonyms only (P01, P02, ...) - the
-name codes are removed before anything is published. Keep your own `salt.bin` (`t7GhostHarvest_private`)
+name codes are removed before anything is published. Keep your own `salt.bin` (`t7GhostDataRecorder_private`, formerly `t7GhostHarvest_private`)
 and `registry.json` private.
 
 ## License

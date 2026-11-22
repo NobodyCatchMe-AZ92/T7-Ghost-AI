@@ -3,6 +3,49 @@
 Version numbers: the **number** changes when new features are added (v1.0a -> v1.1a), the **letter**
 changes when the Ghosts get new training data (v1.1a -> v1.1b).
 
+## v1.4a (2026-11-22)
+- **Wall combos**: every Ghost (41 characters) now has a recorded wall combo. A Ghost that wall splats you finishes with
+  it as soon as it can act. A combo that carries you too close to the wall no longer just ends: the Ghost carries you
+  into the wall with jabs and finishes with the wall combo. A screw from the Ghost's combo with your back within 2.5 m
+  of the wall goes straight into the wall combo (no splat needed); if the Ghost is too far away after the screw, it
+  dashes in first (deeper for characters whose wall combo starts with a short-range move).
+- **Warmup sounds**: the fighters' own voice lines and sound effects play during the warmup animations (offline).
+  Placed per animation and frame in `warmup\sounds.txt`; F1 > Testing Hotkeys > Warmup sound timing keys (Insert /
+  Delete) and a voice line / sound effect picker place new ones.
+- **Jukebox Infinity v1.1 is built in** (F1 > Jukebox Infinity, on by default): a Jukebox mode on the main menu to
+  customize the music, with custom mp3, wav and wem files from the `Jukebox Songs` folder next to the game exe. Uses
+  the same folders and settings as the standalone Jukebox Infinity (your songs and playlists carry over). With the
+  standalone installed as well, the built-in one runs and F1 says which file can be deleted. Applies from the next
+  game start.
+- **Good Morning** (F1 > Game Modifiers, on by default): the announcer greets you at the Bandai Namco splash screen.
+- **Data Recorders built in** (F1 > Data Volunteering (optional)): the Replay Data Recorder and the LIVE Match Data
+  Recorder (formerly the standalone Data Harvesters - no separate files any more). One at a time, off by default.
+  "Start Replay Data Gathering" plays the Battle Log replays one after another by itself, also with the game in the
+  background; "Open Replay Data folder" / "Open LIVE Data folder" open the recordings. The LIVE recorder only ever
+  records online matches. `README_Data_Recorders.txt` explains how to send the data. (Files renamed:
+  `DataRecorder_log.txt`, `t7GhostDataRecorder_private` - an existing key folder is moved over, so your codes stay
+  the same.)
+- **Ghost AI Presets**: "Fair" is now **Basic**; a new **Challenging** (the default) sits between Medium Challenge and
+  the old Challenging, which is now **Very Challenging**. If you used the old Challenging you get the new one.
+- **Skip treasure chest opening** (F1 > Ghost Battle Mode Settings, on by default): the chest opening animation after a
+  match is skipped; the windows showing what you unlocked still appear.
+- **Menu key**: change the key that opens the F1 panel in the panel itself (Menu key: Change, at the bottom) or with
+  `[ui] menu_key`, combinations with Ctrl / Shift / Alt included.
+- **Law gets a Ghost** (41 characters), with recorded punishes (standing and after a blocked low) and 18 combo routes
+  (normal hit, counter hit, low parry). **More Ghost data for Zafina.** 581 combo routes, 2719 moves of frame data.
+  The Ghost data now also comes from real players fighting the Ghosts in Ghost Battle; only the player's side is
+  used - the Ghost's side never is (dataset pseudonym P00).
+- **Devil's Pit** breaks into the lower floor at match point in Ghost Battle too, like in VS; the cutscene can be
+  skipped.
+- **Jungle Outpost (day)** and **Twilight Conflict (evening)** are in Ghost Battle's stage rotation and in Choose a
+  specific Opponent and Stage.
+- Fixed: a crash with a custom costume picked in Choose a specific Opponent and Stage (e.g. Jin, King). Simple Select
+  remembers the custom costume a side wore.
+- Fixed: a Ghost that was K.O.'d no longer moves or taunts after the round (a Ghost that won still taunts).
+- Alisa punishes -13 lows with ws1,2 (the 3 is not guaranteed); Xiaoyu's df+2~1 punish comes out as df+2~1.
+- `t7ghost.ini`: new `[jukebox] enabled`, `[harvesters] mode`, `[modifiers] good_morning`,
+  `[ghost_battle] skip_chest_opening`, `[ai] ai_preset_list` (internal).
+
 ## v1.3a (2026-11-16)
 - **Ghost Battle uses your Game Options time limit** (30 / 40 / 50 / 60 / 99 seconds or infinite), like VS Battle and
   Arcade - Treasure Battle always ran 60 seconds. The round count from the Game Options was already used.
